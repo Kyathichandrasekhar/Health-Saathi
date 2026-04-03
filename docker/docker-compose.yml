@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # Node.js Main Backend
+  backend-node:
+    build:
+      context: ../backend-node
+      dockerfile: ../docker/Dockerfile.node
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../backend-node/.env
+    environment:
+      - FASTAPI_URL=http://backend-fastapi:8001
+    depends_on:
+      - backend-fastapi
+    restart: unless-stopped
+
+  # FastAPI AI Backend
+  backend-fastapi:
+    build:
+      context: ../backend-fastapi
+      dockerfile: ../docker/Dockerfile.fastapi
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../backend-fastapi/.env
+    restart: unless-stopped
+
+  # Frontend (dev mode)
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api
+      - VITE_FASTAPI_URL=http://localhost:8001/api/v1
+    depends_on:
+      - backend-node
+    restart: unless-stopped

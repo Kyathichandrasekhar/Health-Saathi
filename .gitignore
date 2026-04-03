@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend-node/node_modules/
+
+# Environment
+.env
+backend-node/.env
+backend-fastapi/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+backend-fastapi/app/__pycache__/
+
+# Build output
+frontend/dist/
+tsc_output.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Firebase
+serviceAccountKey.json
