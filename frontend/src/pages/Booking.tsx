@@ -564,15 +564,15 @@ export default function Booking() {
         if (mounted) {
           if (immediateHospitals.length > 0) {
             setAllHospitals(immediateHospitals)
-            setBookingError('Showing cached hospitals for faster loading. Latest hospital list is taking longer than expected.')
+            setBookingError('')
           } else if (!preSelected) {
             const liveFallback = await fetchNearbyHospitalsFromOpenStreetMap()
             if (liveFallback.length > 0) {
               setAllHospitals(liveFallback)
-              setBookingError('Backend hospitals are temporarily unavailable. Showing live nearby hospitals from your location.')
+              setBookingError('')
             } else {
               setAllHospitals(FALLBACK_HOSPITALS)
-              setBookingError('Backend hospitals are temporarily unavailable. Showing built-in hospitals for now.')
+              setBookingError('')
             }
           }
         }

@@ -17,9 +17,9 @@ export default function QRGenerator({ data, size = 200, title }: QRGeneratorProp
           value={data}
           size={size}
           bgColor="#ffffff"
-          fgColor="#1e1b4b"
-          level="H"
-          includeMargin={false}
+          fgColor="#000000"
+          level="M"
+          includeMargin={true}
         />
       </div>
       <p className="text-xs text-dark-400 text-center max-w-[200px]">

@@ -6,10 +6,10 @@ const QRCode = require('qrcode');
 async function generateQRBase64(data) {
   const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
   const base64 = await QRCode.toDataURL(dataStr, {
-    color: { dark: '#1e1b4b', light: '#ffffff' },
-    errorCorrectionLevel: 'H',
+    color: { dark: '#000000', light: '#ffffff' },
+    errorCorrectionLevel: 'M',
     margin: 4,
-    width: 300,
+    width: 380,
   });
   // Strip data URI prefix, return raw base64
   return base64.replace(/^data:image\/png;base64,/, '');
@@ -29,7 +29,22 @@ function decodeQRData(qrString) {
   }
 
   try {
-    return JSON.parse(qrString);
+    const parsed = JSON.parse(qrString);
+
+    // Support compact QR payload keys used by the ticket page.
+    if (parsed && typeof parsed === 'object' && !parsed.appointmentId && parsed.a) {
+      return {
+        appointmentId: parsed.a,
+        patientName: parsed.n,
+        doctorName: parsed.d,
+        hospitalName: parsed.h,
+        date: parsed.dt,
+        slot: parsed.s,
+        token: parsed.t,
+      };
+    }
+
+    return parsed;
   } catch {
     return null;
   }

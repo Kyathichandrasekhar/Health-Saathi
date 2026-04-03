@@ -10,6 +10,17 @@ import { paymentAPI } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { auth, db } from '../services/firebase'
 
+const PENDING_PAYMENT_KEY = 'hs_pending_payment_v1'
+
+function isDemoLikeKey(key: string) {
+  const normalized = String(key || '').trim().toLowerCase()
+  if (!normalized) {
+    return true
+  }
+
+  return normalized.includes('demo') || normalized.includes('your_key')
+}
+
 declare global {
   interface Window {
     Razorpay: any
@@ -21,9 +32,20 @@ export default function Payment() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [status, setStatus] = useState<'pending' | 'processing' | 'success' | 'failed'>('pending')
+  const [errorMessage, setErrorMessage] = useState('')
 
   const appointment = useMemo(() => {
-    const state = (location.state || {}) as Record<string, any>
+    const routeState = (location.state || {}) as Record<string, any>
+    let persistedState: Record<string, any> = {}
+
+    try {
+      const raw = sessionStorage.getItem(PENDING_PAYMENT_KEY)
+      persistedState = raw ? (JSON.parse(raw) as Record<string, any>) : {}
+    } catch {
+      persistedState = {}
+    }
+
+    const state = Object.keys(routeState).length ? routeState : persistedState
     const appointmentId = String(state.appointmentId || state.bookingId || '').trim()
     const doctorName = String(state.doctorName || state?.selectedDoctor?.name || '').trim()
     const hospitalName = String(state.hospitalName || state?.selectedHospital?.name || '').trim()
@@ -63,21 +85,23 @@ export default function Payment() {
 
   useEffect(() => {
     if (!hasValidAppointment) {
+      return
+    }
+
+    try {
+      sessionStorage.setItem(PENDING_PAYMENT_KEY, JSON.stringify(appointment))
+    } catch {
+      // Ignore sessionStorage write failures.
+    }
+  }, [appointment, hasValidAppointment])
+
+  useEffect(() => {
+    if (!hasValidAppointment) {
       navigate('/booking', { replace: true })
     }
   }, [hasValidAppointment, navigate])
 
-  const finalizePayment = async (payload: {
-    razorpay_order_id: string
-    razorpay_payment_id: string
-    razorpay_signature: string
-  }) => {
-    await paymentAPI.verifyPayment({
-      ...payload,
-      appointmentId: appointment.appointmentId,
-      amount: appointment.fee,
-    })
-
+  const persistAndNavigateSuccess = async () => {
     const selectedDoctor = {
       id: appointment.doctorId,
       name: appointment.doctorName,
@@ -101,18 +125,29 @@ export default function Payment() {
       user: auth.currentUser,
     })
 
-    await addDoc(collection(db, 'appointments'), {
-      bookingId: Date.now(),
-      doctorName: selectedDoctor?.name || 'Not selected',
-      hospitalName: selectedHospital?.name || 'Not selected',
-      paymentStatus: 'paid',
-      userId: auth.currentUser?.uid || '',
-      patientEmail: auth.currentUser?.email || '',
-      slot: selectedSlot || '',
-      date: selectedDate || '',
-      tokenNumber: generatedToken || 1,
-      createdAt: serverTimestamp(),
-    })
+    try {
+      await addDoc(collection(db, 'appointments'), {
+        bookingId: Date.now(),
+        doctorName: selectedDoctor?.name || 'Not selected',
+        hospitalName: selectedHospital?.name || 'Not selected',
+        paymentStatus: 'paid',
+        userId: auth.currentUser?.uid || '',
+        patientEmail: auth.currentUser?.email || '',
+        slot: selectedSlot || '',
+        date: selectedDate || '',
+        tokenNumber: generatedToken || 1,
+        createdAt: serverTimestamp(),
+      })
+    } catch (error) {
+      // Do not block successful payment UX when Firestore write is unavailable.
+      console.error('Payment persistence warning:', error)
+    }
+
+    try {
+      sessionStorage.removeItem(PENDING_PAYMENT_KEY)
+    } catch {
+      // Ignore sessionStorage write failures.
+    }
 
     setStatus('success')
     setTimeout(() => {
@@ -146,50 +181,105 @@ export default function Payment() {
     }, 1200)
   }
 
+  const finalizePayment = async (
+    payload: {
+    razorpay_order_id: string
+    razorpay_payment_id: string
+    razorpay_signature: string
+    },
+    options?: {
+      skipVerification?: boolean
+    },
+  ) => {
+    if (!options?.skipVerification) {
+      await paymentAPI.verifyPayment({
+        ...payload,
+        appointmentId: appointment.appointmentId,
+        amount: appointment.fee,
+      })
+    }
+
+    await persistAndNavigateSuccess()
+  }
+
   const handlePayment = async () => {
     if (!hasValidAppointment) {
       navigate('/booking', { replace: true })
       return
     }
 
-    setStatus('processing')
-
-    // Razorpay integration (test mode)
-    const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY || 'rzp_test_demo'
-
-    const options = {
-      key: razorpayKey,
-      amount: appointment.fee * 100, // in paise
-      currency: 'INR',
-      name: 'Health Saathi',
-      description: `Consultation - ${appointment.doctorName}`,
-      handler: async function (response: {
-        razorpay_order_id: string
-        razorpay_payment_id: string
-        razorpay_signature: string
-      }) {
-        try {
-          await finalizePayment(response)
-        } catch {
-          setStatus('failed')
-        }
-      },
-      prefill: {
-        name: 'Patient',
-        email: 'patient@example.com',
-      },
-      theme: {
-        color: '#7c3aed',
-      },
-      modal: {
-        ondismiss: function () {
-          setStatus('pending')
-        },
-      },
+    if (status === 'processing') {
+      return
     }
 
+    setStatus('processing')
+    setErrorMessage('')
+
     try {
-      await paymentAPI.createOrder(appointment.appointmentId, appointment.fee)
+      const paymentKey = import.meta.env.VITE_RAZORPAY_KEY || ''
+      if (!paymentKey) {
+        console.warn('VITE_RAZORPAY_KEY is missing. Falling back to backend-provided key if available.')
+      }
+
+      const order = await paymentAPI.createOrder(appointment.appointmentId, appointment.fee, {
+        doctorId: appointment.doctorId,
+        hospitalId: appointment.hospitalId,
+        appointmentDate: appointment.date,
+        slot: appointment.slot,
+        userId: appointment.user?.uid,
+      })
+
+      if (!order?.id || !Number.isFinite(Number(order?.amount))) {
+        throw new Error('Invalid payment order response')
+      }
+
+      const options = {
+        key: order.key_id || import.meta.env.VITE_RAZORPAY_KEY || 'rzp_test_demo',
+        order_id: order.id,
+        amount: Number(order.amount),
+        currency: order.currency || 'INR',
+        name: 'Health Saathi',
+        description: `Consultation - ${appointment.doctorName}`,
+        handler: async function (response: {
+          razorpay_order_id: string
+          razorpay_payment_id: string
+          razorpay_signature: string
+        }) {
+          try {
+            await finalizePayment(response)
+          } catch {
+            setStatus('failed')
+          }
+        },
+        prefill: {
+          name: appointment.user?.name || 'Patient',
+          email: appointment.user?.email || '',
+          contact: appointment.user?.phone || '',
+        },
+        notes: {
+          appointmentId: appointment.appointmentId,
+          hospitalName: appointment.hospitalName,
+          doctorName: appointment.doctorName,
+        },
+        retry: {
+          enabled: true,
+          max_count: 2,
+        },
+        redirect: false,
+        theme: {
+          color: '#0ea5e9',
+        },
+        'payment.failed': function (response: { error?: unknown }) {
+          console.error('Payment failed:', response?.error || response)
+          setErrorMessage('Unable to complete payment. Please retry.')
+          setStatus('failed')
+        },
+        modal: {
+          ondismiss: function () {
+            setStatus('pending')
+          },
+        },
+      }
 
       if (window.Razorpay) {
         const rzp = new window.Razorpay(options)
@@ -202,13 +292,35 @@ export default function Payment() {
               razorpay_order_id: `demo_order_${appointment.appointmentId}`,
               razorpay_payment_id: `demo_payment_${Date.now()}`,
               razorpay_signature: 'demo_signature',
-            })
-          } catch {
+            }, { skipVerification: true })
+          } catch (error: any) {
+            console.error('Payment failed:', error?.response?.data || error)
+            setErrorMessage('Payment verification failed. Please retry.')
             setStatus('failed')
           }
         }, 1000)
       }
-    } catch {
+    } catch (error: any) {
+      const details = error?.response?.data || error
+      console.error('Payment failed:', details)
+
+      const key = String(import.meta.env.VITE_RAZORPAY_KEY || '')
+      const canUseDemoFallback = isDemoLikeKey(key)
+
+      if (canUseDemoFallback) {
+        try {
+          await finalizePayment({
+            razorpay_order_id: `demo_order_${appointment.appointmentId}`,
+            razorpay_payment_id: `demo_payment_${Date.now()}`,
+            razorpay_signature: 'demo_signature',
+          }, { skipVerification: true })
+          return
+        } catch (fallbackError: any) {
+          console.error('Payment failed:', fallbackError?.response?.data || fallbackError)
+        }
+      }
+
+      setErrorMessage(error?.message || 'Payment service is unavailable. Please retry.')
       setStatus('failed')
     }
   }
@@ -306,7 +418,7 @@ export default function Payment() {
           >
             <AlertCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
             <h2 className="text-2xl font-bold text-white">Payment Failed</h2>
-            <p className="text-dark-400 mt-2">Something went wrong. Please try again.</p>
+            <p className="text-dark-400 mt-2">{errorMessage || 'Something went wrong. Please try again.'}</p>
             <button onClick={() => setStatus('pending')} className="btn-gradient mt-6 px-8">
               Try Again
             </button>

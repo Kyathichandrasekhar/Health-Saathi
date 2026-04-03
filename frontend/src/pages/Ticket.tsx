@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Download, Share2, Calendar, Clock, Stethoscope, MapPin, Hash } from 'lucide-react'
@@ -6,6 +6,80 @@ import QRGenerator from '../components/QRGenerator'
 import { jsPDF } from 'jspdf'
 import { bookingAPI, qrAPI, type TicketReceipt } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+
+const TICKET_RECEIPT_CACHE_KEY = 'hs_ticket_receipts_v1'
+
+function toReceiptFromFallback(state: Record<string, any> | null): TicketReceipt | null {
+  if (!state) {
+    return null
+  }
+
+  const appointmentId = String(state.appointmentId || state.bookingId || '').trim()
+  if (!appointmentId) {
+    return null
+  }
+
+  const doctorName = String(state.doctorName || state.selectedDoctor?.name || '').trim()
+  const specialization = String(state.specialty || state.selectedDoctor?.specialization || '').trim()
+  const hospitalName = String(state.hospitalName || state.selectedHospital?.name || '').trim()
+  const date = String(state.date || state.selectedDate || '').trim()
+  const slot = String(state.slot || state.selectedSlot || '').trim()
+  const tokenNumber = Number(state.tokenNumber || 1) || 1
+  const amount = Number(state.fee || state.selectedDoctor?.fee || 0) || 0
+  const paymentStatus = String(state.paymentStatus || 'paid').trim() || 'paid'
+  const userId = String(state.user?.uid || '').trim()
+  const patientName = String(state.user?.name || '').trim() || 'Patient'
+  const patientEmail = String(state.user?.email || '').trim() || 'N/A'
+  const patientPhone = String(state.user?.phone || '').trim()
+
+  if (!doctorName || !hospitalName || !date || !slot) {
+    return null
+  }
+
+  return {
+    appointment_id: appointmentId,
+    patient_name: patientName,
+    patient_email: patientEmail,
+    patient_phone: patientPhone,
+    user_id: userId || patientEmail,
+    doctor_name: doctorName,
+    specialization: specialization || 'General Medicine',
+    hospital_name: hospitalName,
+    date,
+    slot,
+    payment_status: paymentStatus,
+    paid_amount: amount,
+    booking_timestamp: new Date().toISOString(),
+    token_number: tokenNumber,
+    status: 'Confirmed',
+  }
+}
+
+function readCachedReceipt(appointmentId: string): TicketReceipt | null {
+  try {
+    const raw = sessionStorage.getItem(TICKET_RECEIPT_CACHE_KEY)
+    if (!raw) {
+      return null
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, TicketReceipt>
+    const cached = parsed?.[appointmentId]
+    return cached || null
+  } catch {
+    return null
+  }
+}
+
+function cacheReceipt(receipt: TicketReceipt) {
+  try {
+    const raw = sessionStorage.getItem(TICKET_RECEIPT_CACHE_KEY)
+    const current = raw ? (JSON.parse(raw) as Record<string, TicketReceipt>) : {}
+    current[receipt.appointment_id] = receipt
+    sessionStorage.setItem(TICKET_RECEIPT_CACHE_KEY, JSON.stringify(current))
+  } catch {
+    // Ignore sessionStorage failures.
+  }
+}
 
 export default function Ticket() {
   const { appointmentId } = useParams()
@@ -16,9 +90,12 @@ export default function Ticket() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [publicBaseUrl, setPublicBaseUrl] = useState('')
+  const [isDownloading, setIsDownloading] = useState(false)
+  const ticketQrRef = useRef<HTMLDivElement | null>(null)
 
   const fallbackAppointment = (location.state || null) as Record<string, any> | null
   const resolvedAppointmentId = appointmentId || fallbackAppointment?.appointmentId || ''
+  const fallbackReceipt = useMemo(() => toReceiptFromFallback(fallbackAppointment), [fallbackAppointment])
 
   useEffect(() => {
     let mounted = true
@@ -30,16 +107,28 @@ export default function Ticket() {
         return
       }
 
+      const localReceipt = fallbackReceipt || readCachedReceipt(resolvedAppointmentId)
+      if (localReceipt && mounted) {
+        setReceipt(localReceipt)
+        setError('')
+        setLoading(false)
+      }
+
       try {
-        setLoading(true)
+        if (!localReceipt) {
+          setLoading(true)
+        }
         const data = await bookingAPI.getReceipt(resolvedAppointmentId)
         if (mounted) {
           setReceipt(data)
+          cacheReceipt(data)
           setError('')
         }
       } catch {
         if (mounted) {
-          setError('Ticket receipt not found')
+          if (!localReceipt) {
+            setError('Ticket receipt not found')
+          }
         }
       } finally {
         if (mounted) {
@@ -53,7 +142,7 @@ export default function Ticket() {
     return () => {
       mounted = false
     }
-  }, [resolvedAppointmentId])
+  }, [fallbackReceipt, resolvedAppointmentId])
 
   useEffect(() => {
     let mounted = true
@@ -104,61 +193,134 @@ export default function Ticket() {
     return `${base}/ticket/${resolvedAppointmentId}`
   }, [resolvedAppointmentId, publicBaseUrl])
 
+  const qrPayload = useMemo(() => {
+    if (!receipt) {
+      return ticketUrl
+    }
+
+    return JSON.stringify({
+      a: receipt.appointment_id,
+      n: receipt.patient_name,
+      d: receipt.doctor_name,
+      h: receipt.hospital_name,
+      dt: receipt.date,
+      s: receipt.slot,
+      t: receipt.token_number,
+    })
+  }, [receipt, ticketUrl])
+
+  const getRenderedQrPngDataUrl = async () => {
+    const svgElement = ticketQrRef.current?.querySelector('svg') as SVGSVGElement | null
+    if (!svgElement) {
+      return null
+    }
+
+    const serializer = new XMLSerializer()
+    const svgString = serializer.serializeToString(svgElement)
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' })
+    const svgUrl = URL.createObjectURL(svgBlob)
+
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image()
+        image.onload = () => resolve(image)
+        image.onerror = () => reject(new Error('Unable to render QR image'))
+        image.src = svgUrl
+      })
+
+      const canvas = document.createElement('canvas')
+      const svgWidth = Number(svgElement.getAttribute('width')) || img.width || 220
+      const svgHeight = Number(svgElement.getAttribute('height')) || img.height || 220
+      canvas.width = svgWidth
+      canvas.height = svgHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        return null
+      }
+
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0)
+      return canvas.toDataURL('image/png')
+    } finally {
+      URL.revokeObjectURL(svgUrl)
+    }
+  }
+
   const handleDownload = async () => {
     if (!receipt) {
       return
     }
 
-    const qr = await qrAPI.generate({
-      appointmentId: receipt.appointment_id,
-      ticketUrl,
-      token: receipt.token_number,
-      doctorName: receipt.doctor_name,
-      date: receipt.date,
-      slot: receipt.slot,
-    })
+    try {
+      setIsDownloading(true)
 
-    const qrDataUrl = `data:image/png;base64,${qr.qr_image}`
-    const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
+      let qrDataUrl = (await getRenderedQrPngDataUrl()) || ''
 
-    pdf.setFillColor(21, 31, 65)
-    pdf.rect(0, 0, 595, 90, 'F')
-    pdf.setTextColor(255, 255, 255)
-    pdf.setFontSize(22)
-    pdf.text('Health Saathi - Appointment Receipt', 40, 55)
+      if (!qrDataUrl) {
+        try {
+          const qr = await qrAPI.generate({
+            appointmentId: receipt.appointment_id,
+            ticketUrl,
+            token: receipt.token_number,
+            doctorName: receipt.doctor_name,
+            date: receipt.date,
+            slot: receipt.slot,
+          })
+          qrDataUrl = `data:image/png;base64,${qr.qr_image}`
+        } catch (error) {
+          console.error('QR API unavailable and no on-screen QR found:', error)
+        }
+      }
 
-    pdf.setTextColor(20, 20, 20)
-    pdf.setFontSize(11)
+      const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
 
-    const lines = [
-      `Appointment ID: ${receipt.appointment_id}`,
-      `Patient Name: ${receipt.patient_name}`,
-      `Patient Email: ${receipt.patient_email}`,
-      `Patient User ID: ${receipt.user_id}`,
-      `Patient Phone: ${receipt.patient_phone || 'N/A'}`,
-      `Hospital: ${receipt.hospital_name}`,
-      `Doctor: ${receipt.doctor_name}`,
-      `Specialization: ${receipt.specialization}`,
-      `Appointment Date: ${receipt.date}`,
-      `Appointment Time: ${receipt.slot}`,
-      `Token Number: ${receipt.token_number}`,
-      `Payment Status: ${receipt.payment_status}`,
-      `Paid Amount: INR ${receipt.paid_amount}`,
-      `Booking Timestamp: ${new Date(receipt.booking_timestamp).toLocaleString('en-IN')}`,
-    ]
+      pdf.setFillColor(21, 31, 65)
+      pdf.rect(0, 0, 595, 90, 'F')
+      pdf.setTextColor(255, 255, 255)
+      pdf.setFontSize(22)
+      pdf.text('Health Saathi - Appointment Receipt', 40, 55)
 
-    let y = 130
-    lines.forEach((line) => {
-      pdf.text(line, 40, y)
-      y += 22
-    })
+      pdf.setTextColor(20, 20, 20)
+      pdf.setFontSize(11)
 
-    pdf.addImage(qrDataUrl, 'PNG', 390, 125, 160, 160)
-    pdf.setFontSize(9)
-    pdf.text('Scan this QR to open appointment receipt', 390, 300)
-    pdf.text(ticketUrl, 40, 500)
+      const lines = [
+        `Appointment ID: ${receipt.appointment_id}`,
+        `Patient Name: ${receipt.patient_name}`,
+        `Patient Email: ${receipt.patient_email}`,
+        `Patient User ID: ${receipt.user_id}`,
+        `Patient Phone: ${receipt.patient_phone || 'N/A'}`,
+        `Hospital: ${receipt.hospital_name}`,
+        `Doctor: ${receipt.doctor_name}`,
+        `Specialization: ${receipt.specialization}`,
+        `Appointment Date: ${receipt.date}`,
+        `Appointment Time: ${receipt.slot}`,
+        `Token Number: ${receipt.token_number}`,
+        `Payment Status: ${receipt.payment_status}`,
+        `Paid Amount: INR ${receipt.paid_amount}`,
+        `Booking Timestamp: ${new Date(receipt.booking_timestamp).toLocaleString('en-IN')}`,
+      ]
 
-    pdf.save(`HealthSaathi-Receipt-${receipt.appointment_id}.pdf`)
+      let y = 130
+      lines.forEach((line) => {
+        pdf.text(line, 40, y)
+        y += 22
+      })
+
+      if (qrDataUrl) {
+        pdf.addImage(qrDataUrl, 'PNG', 390, 125, 160, 160)
+        pdf.setFontSize(9)
+        pdf.text('Scan this QR to open appointment receipt', 390, 300)
+      }
+
+      pdf.text(ticketUrl, 40, 500)
+      pdf.save(`HealthSaathi-Receipt-${receipt.appointment_id}.pdf`)
+    } catch (error) {
+      console.error('Receipt download failed:', error)
+      window.alert('Unable to download receipt right now. Please try again.')
+    } finally {
+      setIsDownloading(false)
+    }
   }
 
   const handleShare = async () => {
@@ -223,8 +385,8 @@ export default function Ticket() {
               <p className="text-center text-sm text-dark-400 mb-6">Token Number</p>
 
               {/* QR Code */}
-              <div className="flex justify-center mb-6">
-                <QRGenerator data={ticketUrl} size={180} />
+              <div ref={ticketQrRef} className="flex justify-center mb-6">
+                <QRGenerator data={qrPayload} size={220} />
               </div>
               {!import.meta.env.VITE_PUBLIC_APP_URL && (
                 <p className="text-xs text-amber-300 text-center mb-4">
@@ -292,9 +454,13 @@ export default function Ticket() {
 
               {/* Actions */}
               <div className="grid grid-cols-2 gap-3 mt-6">
-                <button onClick={handleDownload} className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-dark-300 hover:bg-white/10 transition-all text-sm font-medium">
+                <button
+                  onClick={handleDownload}
+                  disabled={isDownloading}
+                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-dark-300 hover:bg-white/10 transition-all text-sm font-medium disabled:opacity-60"
+                >
                   <Download className="w-4 h-4" />
-                  Download
+                  {isDownloading ? 'Downloading...' : 'Download'}
                 </button>
                 <button onClick={handleShare} className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-dark-300 hover:bg-white/10 transition-all text-sm font-medium">
                   <Share2 className="w-4 h-4" />

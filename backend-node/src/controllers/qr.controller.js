@@ -40,6 +40,26 @@ async function validateQR(req, res) {
 
   const appointment = await getAppointmentById(decoded.appointmentId);
   if (!appointment) {
+    // Fallback for local/demo QR payloads where appointment may not exist in backend store.
+    if (decoded.patientName || decoded.doctorName || decoded.date || decoded.slot) {
+      return res.json({
+        valid: true,
+        data: {
+          appointmentId: decoded.appointmentId,
+          patientName: decoded.patientName || 'Patient',
+          doctorName: decoded.doctorName || 'Doctor',
+          hospitalName: decoded.hospitalName || 'Hospital',
+          date: decoded.date || '-',
+          slot: decoded.slot || '-',
+          token: Number(decoded.token) || 0,
+          paymentStatus: decoded.paymentStatus || 'paid',
+          status: decoded.status || 'Booked',
+          doctorId: decoded.doctorId || '',
+          source: 'embedded',
+        },
+      });
+    }
+
     return res.json({ valid: false, error: 'Appointment not found' });
   }
 
@@ -55,6 +75,8 @@ async function validateQR(req, res) {
       token: appointment.token_number,
       paymentStatus: appointment.payment_status,
       status: appointment.status,
+      doctorId: appointment.doctor_id || '',
+      source: 'backend',
     },
   });
 }

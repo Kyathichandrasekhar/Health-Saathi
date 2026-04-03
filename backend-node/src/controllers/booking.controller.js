@@ -29,36 +29,49 @@ function firstNonEmpty(...values) {
 }
 
 async function getAvailableSlots(req, res) {
-  const { doctorId, date } = req.query;
+  try {
+    const { doctorId, date } = req.query;
+    console.log('booking.getAvailableSlots.request', { doctorId, date });
 
-  const doctor = getDoctorById(doctorId);
-  if (!doctor) {
-    return res.status(404).json({ error: 'Doctor not found' });
+    const doctor = getDoctorById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'Doctor not found' });
+    }
+
+    const appointments = await listAppointmentsForDoctorDate(doctorId, date);
+    const booked = new Set(appointments.map((appointment) => appointment.slot));
+
+    const schedule = getSlotsForDoctor(doctorId);
+    const available = schedule.filter((slot) => !booked.has(slot));
+    return res.json({ slots: available, doctor_id: doctorId, date, slot_timings: doctor.slot_timings });
+  } catch (error) {
+    console.error('booking.getAvailableSlots.error', error);
+    return res.status(500).json({ error: 'Failed to fetch available slots' });
   }
-
-  const appointments = await listAppointmentsForDoctorDate(doctorId, date);
-  const booked = new Set(appointments.map((appointment) => appointment.slot));
-
-  const schedule = getSlotsForDoctor(doctorId);
-  const available = schedule.filter((slot) => !booked.has(slot));
-  res.json({ slots: available, doctor_id: doctorId, date, slot_timings: doctor.slot_timings });
 }
 
 async function createBooking(req, res) {
-  const {
-    hospitalId,
-    doctorId,
-    slot,
-    date,
-    hospitalName,
-    doctorName,
-    specialization,
-    fee,
-    slotTimings,
-    patientName,
-    patientEmail,
-    patientPhone,
-  } = req.body;
+  try {
+    const {
+      hospitalId,
+      doctorId,
+      slot,
+      date,
+      hospitalName,
+      doctorName,
+      specialization,
+      fee,
+      slotTimings,
+      patientName,
+      patientEmail,
+      patientPhone,
+    } = req.body || {};
+    console.log('booking.create.request', {
+      hospitalId,
+      doctorId,
+      date,
+      slot,
+    });
   const existingDoctor = getDoctorById(doctorId);
   const doctor = existingDoctor || {
     id: doctorId,
@@ -122,31 +135,49 @@ async function createBooking(req, res) {
     createdAt,
   };
 
-  await saveAppointment(appointment);
-  res.json(appointment);
+    await saveAppointment(appointment);
+    return res.json(appointment);
+  } catch (error) {
+    console.error('booking.create.error', error);
+    return res.status(500).json({ error: 'Failed to create booking' });
+  }
 }
 
 async function getUserBookings(req, res) {
-  const uid = req.user?.uid || 'demo_user';
-  const bookings = await listAppointmentsByUser(uid);
-  res.json(bookings);
+  try {
+    const uid = req.user?.uid || 'demo_user';
+    console.log('booking.getUserBookings.request', { uid });
+    const bookings = await listAppointmentsByUser(uid);
+    return res.json(bookings);
+  } catch (error) {
+    console.error('booking.getUserBookings.error', error);
+    return res.status(500).json({ error: 'Failed to fetch user bookings' });
+  }
 }
 
 async function getBookingById(req, res) {
-  const { appointment_id } = req.params;
-  const appointment = await getAppointmentById(appointment_id);
-  if (appointment) {
-    return res.json(appointment);
+  try {
+    const { appointment_id } = req.params;
+    console.log('booking.getById.request', { appointment_id });
+    const appointment = await getAppointmentById(appointment_id);
+    if (appointment) {
+      return res.json(appointment);
+    }
+    return res.status(404).json({ error: 'Appointment not found' });
+  } catch (error) {
+    console.error('booking.getById.error', error);
+    return res.status(500).json({ error: 'Failed to fetch booking' });
   }
-  return res.status(404).json({ error: 'Appointment not found' });
 }
 
 async function getTicketReceipt(req, res) {
-  const { appointment_id } = req.params;
-  const appointment = await getAppointmentById(appointment_id);
-  if (!appointment) {
-    return res.status(404).json({ error: 'Appointment not found' });
-  }
+  try {
+    const { appointment_id } = req.params;
+    console.log('booking.getTicketReceipt.request', { appointment_id });
+    const appointment = await getAppointmentById(appointment_id);
+    if (!appointment) {
+      return res.status(404).json({ error: 'Appointment not found' });
+    }
 
   const receipt = {
     appointment_id: firstNonEmpty(appointment.id, appointment.bookingId),
@@ -166,7 +197,11 @@ async function getTicketReceipt(req, res) {
     status: firstNonEmpty(appointment.status, 'Booked'),
   };
 
-  return res.json(receipt);
+    return res.json(receipt);
+  } catch (error) {
+    console.error('booking.getTicketReceipt.error', error);
+    return res.status(500).json({ error: 'Failed to fetch receipt' });
+  }
 }
 
 module.exports = { getAvailableSlots, createBooking, getUserBookings, getBookingById, getTicketReceipt };

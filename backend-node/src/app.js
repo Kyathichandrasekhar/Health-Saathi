@@ -14,12 +14,13 @@ const paymentRoutes = require('./routes/payment.routes');
 const queueRoutes = require('./routes/queue.routes');
 const qrRoutes = require('./routes/qr.routes');
 const assistantRoutes = require('./routes/assistant.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', '*'],
+  origin: true,
   credentials: true,
 }));
 app.use(express.json());
@@ -32,6 +33,7 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/qr', qrRoutes);
 app.use('/api/assistant', assistantRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -39,24 +41,29 @@ app.get('/api/health', (req, res) => {
 });
 
 app.get('/api/public-base-url', (req, res) => {
-  const configured = process.env.PUBLIC_APP_URL;
-  if (configured) {
-    return res.json({ url: configured });
-  }
+  try {
+    const configured = process.env.PUBLIC_APP_URL;
+    if (configured) {
+      return res.json({ url: configured });
+    }
 
-  const interfaces = os.networkInterfaces();
-  const candidates = Object.values(interfaces)
-    .flat()
-    .filter((address) => address && address.family === 'IPv4' && !address.internal)
-    .map((address) => address.address);
+    const interfaces = os.networkInterfaces() || {};
+    const candidates = Object.values(interfaces)
+      .flatMap((group) => (Array.isArray(group) ? group : []))
+      .filter((address) => address && address.family === 'IPv4' && !address.internal)
+      .map((address) => address.address);
 
-  const lanIp = candidates[0];
-  if (!lanIp) {
+    const lanIp = candidates[0];
+    if (!lanIp) {
+      return res.json({ url: null });
+    }
+
+    const frontendPort = process.env.FRONTEND_PORT || '5173';
+    return res.json({ url: `http://${lanIp}:${frontendPort}` });
+  } catch (error) {
+    console.error('public-base-url.error', error);
     return res.json({ url: null });
   }
-
-  const frontendPort = process.env.FRONTEND_PORT || '5173';
-  return res.json({ url: `http://${lanIp}:${frontendPort}` });
 });
 
 // Error handler

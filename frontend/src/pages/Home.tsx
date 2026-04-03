@@ -1,9 +1,10 @@
-import { useCallback, useState } from 'react'
+import { Suspense, lazy, useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, Activity } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import MapView from '../components/MapView'
 import HospitalCard from '../components/HospitalCard'
+
+const MapView = lazy(() => import('../components/MapView'))
 
 const HOSPITAL_CACHE_KEY = 'hs_nearby_hospitals_cache_v1'
 
@@ -83,7 +84,19 @@ export default function Home() {
               transition={{ duration: 0.6, delay: 0.2 }}
               className="h-[500px] rounded-2xl overflow-hidden shadow-glass-lg"
             >
-              <MapView onHospitalsLoaded={handleHospitalsLoaded} />
+              <Suspense
+                fallback={
+                  <div className="h-full w-full bg-dark-900/80 animate-pulse">
+                    <div className="h-full w-full grid grid-cols-3 gap-2 p-4 opacity-60">
+                      {Array.from({ length: 12 }).map((_, i) => (
+                        <div key={i} className="rounded-xl bg-white/5" />
+                      ))}
+                    </div>
+                  </div>
+                }
+              >
+                <MapView onHospitalsLoaded={handleHospitalsLoaded} />
+              </Suspense>
             </motion.div>
           </div>
         </div>

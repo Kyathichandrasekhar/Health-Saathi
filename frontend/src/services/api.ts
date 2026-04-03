@@ -29,17 +29,32 @@ function toFriendlyApiError(status: number, message: string) {
 }
 
 function getApiBaseCandidates() {
-  const candidates: string[] = [API_BASE]
-
-  if (API_BASE !== '/api') {
-    candidates.push('/api')
-  }
+  const candidates: string[] = []
 
   if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    const runningOnLocalHost = host === 'localhost' || host === '127.0.0.1'
+    const baseLooksLocalhost = /https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(API_BASE)
+
+    // Skip hardcoded localhost API base when app is opened from another device via LAN IP.
+    if (!(baseLooksLocalhost && !runningOnLocalHost)) {
+      candidates.push(API_BASE)
+    }
+
     const originApi = `${window.location.origin.replace(/\/$/, '')}/api`
     if (API_BASE !== originApi) {
       candidates.push(originApi)
     }
+
+    if (!runningOnLocalHost) {
+      candidates.push(`http://${host}:8000/api`)
+    }
+  } else {
+    candidates.push(API_BASE)
+  }
+
+  if (API_BASE !== '/api') {
+    candidates.push('/api')
   }
 
   return [...new Set(candidates)]
@@ -237,10 +252,20 @@ export const bookingAPI = {
 
 // ========== Payment APIs ==========
 export const paymentAPI = {
-  createOrder: (appointmentId: string, amount: number) =>
+  createOrder: (
+    appointmentId: string,
+    amount: number,
+    meta?: {
+      doctorId?: string
+      hospitalId?: string
+      appointmentDate?: string
+      slot?: string
+      userId?: string
+    },
+  ) =>
     apiFetch<any>('/payment/create-order', {
       method: 'POST',
-      body: JSON.stringify({ appointmentId, amount }),
+      body: JSON.stringify({ appointmentId, amount, ...meta }),
     }),
 
   verifyPayment: (data: {
@@ -300,6 +325,8 @@ export const qrAPI = {
         token: number
         paymentStatus: string
         status: string
+        doctorId?: string
+        source?: string
       }
     }>('/qr/validate', {
       method: 'POST',
@@ -313,5 +340,48 @@ export const assistantAPI = {
     apiFetch<{ reply: string; suggestions?: string[] }>('/assistant/chat', {
       method: 'POST',
       body: JSON.stringify({ message }),
+    }),
+}
+
+// ========== Admin APIs ==========
+export const adminAPI = {
+  validateTicket: (ticketId: string) =>
+    apiFetch<{
+      status: 'valid' | 'invalid' | 'already_checked_in'
+      message?: string
+      appointmentId?: string
+      patientName?: string
+      doctorName?: string
+      hospitalName?: string
+      slot?: string
+      date?: string
+      token?: number
+      paymentStatus?: string
+      checkedIn?: boolean
+      doctorId?: string
+    }>('/admin/validate-ticket', {
+      method: 'POST',
+      body: JSON.stringify({ ticketId, qrData: ticketId }),
+    }),
+
+  checkIn: (ticketId: string) =>
+    apiFetch<{
+      status: 'checked_in' | 'already_checked_in' | 'invalid'
+      message?: string
+      appointmentId?: string
+      patientName?: string
+      doctorName?: string
+      hospitalName?: string
+      slot?: string
+      date?: string
+      token?: number
+      paymentStatus?: string
+      checkedIn?: boolean
+      doctorId?: string
+      queuePosition?: number
+      queueTotal?: number
+    }>('/admin/checkin', {
+      method: 'POST',
+      body: JSON.stringify({ ticketId, qrData: ticketId }),
     }),
 }

@@ -3,7 +3,10 @@ import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-
 import L from 'leaflet'
 import { ArrowRight, Clock, MapPin, Navigation, Search } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import MarkerClusterGroup from 'react-leaflet-cluster'
 import 'leaflet/dist/leaflet.css'
+import 'leaflet.markercluster/dist/MarkerCluster.css'
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 
 interface MapViewProps {
   onHospitalsLoaded?: (hospitals: HospitalData[]) => void
@@ -439,12 +442,19 @@ function normalizeOverpassHospitals(elements: OverpassElement[], center: LatLng)
   return [...nearbyHospitals, ...dedupedFarAliases].slice(0, MAX_HOSPITAL_RESULTS)
 }
 
-function MapViewportController({ target }: { target: LatLng }) {
+function MapViewportController({ target, animate }: { target: LatLng; animate: boolean }) {
   const map = useMap()
 
   useEffect(() => {
-    map.flyTo([target.lat, target.lng], 15, { duration: 0.8 })
-  }, [map, target.lat, target.lng])
+    if (animate) {
+      map.flyTo([target.lat, target.lng], 15, { duration: 0.8 })
+      return
+    }
+
+    map.setView([target.lat, target.lng], map.getZoom(), {
+      animate: false,
+    })
+  }, [animate, map, target.lat, target.lng])
 
   return null
 }
@@ -478,6 +488,7 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [hospitals, setHospitals] = useState<HospitalData[]>([])
   const [routePath, setRoutePath] = useState<LatLng[]>([])
+  const [isMapTilesReady, setIsMapTilesReady] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const lastFetchedLocationRef = useRef<LatLng | null>(null)
   const lastGeoUpdateRef = useRef<GeoFix | null>(null)
@@ -634,8 +645,8 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
       },
       {
         enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 1000,
+        timeout: 10000,
+        maximumAge: 0,
       },
     )
 
@@ -879,12 +890,15 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
   return (
     <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-glass-lg">
       <MapContainer center={[mapTarget.lat, mapTarget.lng]} zoom={15} className="w-full h-full" zoomControl={true}>
-        <MapViewportController target={mapTarget} />
+        <MapViewportController target={mapTarget} animate={Boolean(selectedHospital) || routePath.length > 0} />
         <RouteViewportController route={routePath} />
 
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          eventHandlers={{
+            load: () => setIsMapTilesReady(true),
+          }}
         />
 
         {routePath.length > 1 && (
@@ -900,19 +914,27 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
           </Popup>
         </Marker>
 
-        {visibleHospitals.map((hospital) => (
-          <Marker
-            key={hospital.id}
-            position={[hospital.lat, hospital.lng]}
-            icon={selectedHospital?.id === hospital.id ? highlightedHospitalIcon : hospitalIcon}
-            eventHandlers={{
-              click: () => {
-                setSelectedHospital(hospital)
-                setMapTarget({ lat: hospital.lat, lng: hospital.lng })
-              },
-            }}
-          />
-        ))}
+        <MarkerClusterGroup
+          chunkedLoading
+          removeOutsideVisibleBounds
+          maxClusterRadius={38}
+          spiderfyOnMaxZoom
+          showCoverageOnHover={false}
+        >
+          {visibleHospitals.map((hospital) => (
+            <Marker
+              key={hospital.id}
+              position={[hospital.lat, hospital.lng]}
+              icon={selectedHospital?.id === hospital.id ? highlightedHospitalIcon : hospitalIcon}
+              eventHandlers={{
+                click: () => {
+                  setSelectedHospital(hospital)
+                  setMapTarget({ lat: hospital.lat, lng: hospital.lng })
+                },
+              }}
+            />
+          ))}
+        </MarkerClusterGroup>
 
         {selectedHospital && (
           <Popup
@@ -994,6 +1016,16 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
           )}
         </div>
       </div>
+
+      {(!isMapTilesReady || isHospitalsLoading) && (
+        <div className="absolute inset-0 z-[700] pointer-events-none bg-dark-900/45 backdrop-blur-[1px]">
+          <div className="h-full w-full p-4 grid grid-cols-3 gap-2 animate-pulse opacity-70">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="rounded-lg bg-white/10" />
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="absolute bottom-6 left-6 pointer-events-none z-[800]">
         <div className="glass rounded-xl px-4 py-3 flex items-center gap-3 w-max max-w-full backdrop-blur-md shadow-lg pointer-events-auto">
