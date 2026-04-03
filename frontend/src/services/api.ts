@@ -9,17 +9,20 @@ function isLikelyProxyUpstreamFailure(message: string) {
     m.includes('cannot proxy') ||
     m.includes('proxy error') ||
     m.includes('upstream') ||
-    m.includes('socket hang up')
+    m.includes('socket hang up') ||
+    m.includes('internal server error') ||
+    m.includes('bad gateway') ||
+    m.includes('service unavailable')
   )
 }
 
 function toFriendlyApiError(status: number, message: string) {
   if (status >= 500 && isLikelyProxyUpstreamFailure(message)) {
-    return 'Backend service is not reachable. Start backend-node on port 8000 and try again.'
+    return 'Backend service is temporarily unavailable. Please retry in a moment.'
   }
 
   if (status === 500 && (!message || message === 'HTTP 500')) {
-    return 'Server error while processing request. Please retry in a moment.'
+    return 'Backend service is temporarily unavailable. Please retry in a moment.'
   }
 
   return message || `HTTP ${status}`
@@ -149,6 +152,7 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
         if (
           res.status === 404 ||
           res.status === 405 ||
+          res.status === 500 ||
           res.status === 502 ||
           res.status === 503 ||
           res.status === 504 ||

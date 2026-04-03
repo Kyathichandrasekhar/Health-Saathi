@@ -60,14 +60,28 @@ interface NominatimReverseResponse {
   address?: Record<string, string>
 }
 
+interface GeoFix {
+  location: LatLng
+  ts: number
+  accuracy: number
+}
+
 const FALLBACK_LOCATION: LatLng = { lat: 16.5062, lng: 80.648 }
-const SEARCH_RADIUS_METERS = 50000
+const SEARCH_RADIUS_METERS = 35000
 const SEARCH_DEBOUNCE_MS = 220
 const MIN_FETCH_MOVEMENT_KM = 0.3
 const MIN_GEO_UPDATE_MOVEMENT_KM = 0.03
 const MIN_GEO_UPDATE_INTERVAL_MS = 4000
+const MAX_ACCEPTABLE_ACCURACY_METERS = 120
+const MAX_COARSE_ACCURACY_WITHOUT_FIX_METERS = 2000
+const MAX_REALISTIC_SPEED_KMH = 250
+const NEARBY_PRIORITY_RADIUS_KM = 12
+const FAST_NEARBY_RADIUS_METERS = 14000
+const FAST_OVERPASS_TIMEOUT_SEC = 6
 const MAX_VISIBLE_MARKERS = 120
 const MAX_REVERSE_GEOCODE_ITEMS = 20
+const MAX_HOSPITAL_RESULTS = 140
+const HOSPITAL_CACHE_KEY = 'hs_nearby_hospitals_cache_v1'
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
@@ -83,14 +97,14 @@ const userIcon = L.divIcon({
 
 const hospitalIcon = L.divIcon({
   className: 'custom-hospital-dot',
-  html: '<span style="display:block;width:14px;height:14px;border-radius:9999px;background:#7c3aed;border:2px solid #ffffff;box-shadow:0 0 0 5px rgba(124,58,237,0.2);"></span>',
+  html: '<span style="display:block;width:16px;height:16px;border-radius:9999px;background:#2563eb;border:2px solid #ffffff;box-shadow:0 0 0 7px rgba(37,99,235,0.28);"></span>',
   iconSize: [14, 14],
   iconAnchor: [7, 7],
 })
 
 const highlightedHospitalIcon = L.divIcon({
   className: 'custom-hospital-dot-selected',
-  html: '<span style="display:block;width:18px;height:18px;border-radius:9999px;background:#8b5cf6;border:3px solid #ffffff;box-shadow:0 0 0 8px rgba(139,92,246,0.28);"></span>',
+  html: '<span style="display:block;width:20px;height:20px;border-radius:9999px;background:#1d4ed8;border:3px solid #ffffff;box-shadow:0 0 0 10px rgba(29,78,216,0.3);"></span>',
   iconSize: [18, 18],
   iconAnchor: [9, 9],
 })
@@ -329,25 +343,100 @@ async function reverseGeocodeAddress(lat: number, lng: number) {
   }
 }
 
-function buildOverpassQuery(center: LatLng) {
+function buildOverpassQuery(center: LatLng, radiusMeters = SEARCH_RADIUS_METERS, timeoutSeconds = 12, includeClinic = true) {
+  const clinicClauses = includeClinic
+    ? `
+  node["amenity"="clinic"](around:${radiusMeters},${center.lat},${center.lng});
+  way["amenity"="clinic"](around:${radiusMeters},${center.lat},${center.lng});
+  relation["amenity"="clinic"](around:${radiusMeters},${center.lat},${center.lng});
+  node["healthcare"~"^(clinic|medical_center|centre)$"](around:${radiusMeters},${center.lat},${center.lng});
+  way["healthcare"~"^(clinic|medical_center|centre)$"](around:${radiusMeters},${center.lat},${center.lng});
+  relation["healthcare"~"^(clinic|medical_center|centre)$"](around:${radiusMeters},${center.lat},${center.lng});`
+    : ''
+
   return `
-[out:json][timeout:25];
+[out:json][timeout:${timeoutSeconds}];
 (
-  node["amenity"="hospital"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  way["amenity"="hospital"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  relation["amenity"="hospital"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  node["healthcare"="hospital"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  way["healthcare"="hospital"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  relation["healthcare"="hospital"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  node["amenity"="clinic"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  way["amenity"="clinic"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  relation["amenity"="clinic"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  node["healthcare"~"^(clinic|medical_center|centre)$"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  way["healthcare"~"^(clinic|medical_center|centre)$"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
-  relation["healthcare"~"^(clinic|medical_center|centre)$"](around:${SEARCH_RADIUS_METERS},${center.lat},${center.lng});
+  node["amenity"="hospital"](around:${radiusMeters},${center.lat},${center.lng});
+  way["amenity"="hospital"](around:${radiusMeters},${center.lat},${center.lng});
+  relation["amenity"="hospital"](around:${radiusMeters},${center.lat},${center.lng});
+  node["healthcare"="hospital"](around:${radiusMeters},${center.lat},${center.lng});
+  way["healthcare"="hospital"](around:${radiusMeters},${center.lat},${center.lng});
+  relation["healthcare"="hospital"](around:${radiusMeters},${center.lat},${center.lng});${clinicClauses}
 );
 out center tags;
 `
+}
+
+function normalizeOverpassHospitals(elements: OverpassElement[], center: LatLng) {
+  const rawHospitals = elements
+    .map((element) => {
+      const tags = element.tags
+      const lat = element.lat ?? element.center?.lat
+      const lng = element.lon ?? element.center?.lon
+      const name = tags?.name?.trim() || 'Hospital'
+
+      if (typeof lat !== 'number' || typeof lng !== 'number') {
+        return null
+      }
+
+      const km = calculateDistance(center.lat, center.lng, lat, lng)
+      const addressFromTags = formatAddressFromTags(tags)
+
+      return {
+        id: `${element.type}-${element.id}`,
+        name,
+        address: addressFromTags,
+        phone: extractHospitalPhone(tags),
+        openingHours: extractOpeningHours(tags),
+        website: extractHospitalWebsite(tags),
+        lat,
+        lng,
+        location: { lat, lng },
+        distance: `${km.toFixed(1)} km`,
+        rating: Number.isFinite(Number(tags?.stars)) ? Number(tags?.stars) : 0,
+        specialties: parseSpecialties(tags),
+        eta: `${Math.max(4, Math.round((km / 25) * 60))} min`,
+        availableDoctors: 0,
+      } satisfies HospitalData
+    })
+    .filter((hospital): hospital is HospitalData => hospital !== null)
+
+  const dedupeByExactNameAndPoint = rawHospitals.filter(
+    (hospital, index, arr) =>
+      index ===
+      arr.findIndex(
+        (candidate) =>
+          candidate.name.trim().toLowerCase() === hospital.name.trim().toLowerCase() &&
+          candidate.lat.toFixed(6) === hospital.lat.toFixed(6) &&
+          candidate.lng.toFixed(6) === hospital.lng.toFixed(6),
+      ),
+  )
+
+  dedupeByExactNameAndPoint.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance))
+
+  const nearbyHospitals = dedupeByExactNameAndPoint.filter(
+    (hospital) => parseFloat(hospital.distance) <= NEARBY_PRIORITY_RADIUS_KM,
+  )
+  const farHospitals = dedupeByExactNameAndPoint.filter(
+    (hospital) => parseFloat(hospital.distance) > NEARBY_PRIORITY_RADIUS_KM,
+  )
+
+  const dedupedFarAliases = farHospitals.filter((hospital, index, arr) => {
+    return (
+      index ===
+      arr.findIndex((candidate) => {
+        const similarity = nameSimilarity(candidate.name, hospital.name)
+        const spacingKm = calculateDistance(candidate.lat, candidate.lng, hospital.lat, hospital.lng)
+        if (similarity < 0.72) {
+          return false
+        }
+        return spacingKm <= 0.8
+      })
+    )
+  })
+
+  return [...nearbyHospitals, ...dedupedFarAliases].slice(0, MAX_HOSPITAL_RESULTS)
 }
 
 function MapViewportController({ target }: { target: LatLng }) {
@@ -391,8 +480,72 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
   const [routePath, setRoutePath] = useState<LatLng[]>([])
   const searchInputRef = useRef<HTMLInputElement>(null)
   const lastFetchedLocationRef = useRef<LatLng | null>(null)
-  const lastGeoUpdateRef = useRef<{ location: LatLng; ts: number } | null>(null)
+  const lastGeoUpdateRef = useRef<GeoFix | null>(null)
   const routeControllerRef = useRef<AbortController | null>(null)
+
+  const readHospitalsFromCache = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(HOSPITAL_CACHE_KEY)
+      if (!raw) {
+        return [] as HospitalData[]
+      }
+
+      const parsed = JSON.parse(raw) as { ts?: number; hospitals?: HospitalData[] }
+      if (!Array.isArray(parsed?.hospitals)) {
+        return [] as HospitalData[]
+      }
+
+      return parsed.hospitals
+    } catch {
+      return [] as HospitalData[]
+    }
+  }, [])
+
+  const shouldAcceptGeoFix = useCallback((position: GeolocationPosition, previousFix: GeoFix | null) => {
+    const accuracy = Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : Infinity
+    const liveLoc = {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+    }
+
+    if (!previousFix) {
+      if (accuracy > MAX_COARSE_ACCURACY_WITHOUT_FIX_METERS) {
+        return { accepted: false, location: liveLoc, accuracy }
+      }
+      return { accepted: true, location: liveLoc, accuracy }
+    }
+
+    const now = Date.now()
+    const movedKm = calculateDistance(previousFix.location.lat, previousFix.location.lng, liveLoc.lat, liveLoc.lng)
+    const elapsedMs = now - previousFix.ts
+    const elapsedHours = elapsedMs / 3600000
+    const estimatedSpeedKmh = elapsedHours > 0 ? movedKm / elapsedHours : 0
+
+    if (estimatedSpeedKmh > MAX_REALISTIC_SPEED_KMH) {
+      return { accepted: false, location: liveLoc, accuracy }
+    }
+
+    if (accuracy > MAX_ACCEPTABLE_ACCURACY_METERS && accuracy > previousFix.accuracy * 1.8) {
+      return { accepted: false, location: liveLoc, accuracy }
+    }
+
+    if (movedKm < MIN_GEO_UPDATE_MOVEMENT_KM && elapsedMs < MIN_GEO_UPDATE_INTERVAL_MS) {
+      return { accepted: false, location: liveLoc, accuracy }
+    }
+
+    return { accepted: true, location: liveLoc, accuracy }
+  }, [])
+
+  const applyAcceptedGeoFix = useCallback((location: LatLng, accuracy: number) => {
+    lastGeoUpdateRef.current = {
+      location,
+      ts: Date.now(),
+      accuracy,
+    }
+
+    setUserLocation(location)
+    setLocationStatus('Live Location Active')
+  }, [])
 
   const handleSelectHospital = useCallback((hospital: HospitalData) => {
     setSelectedHospital(hospital)
@@ -410,6 +563,16 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
   }, [navigate])
 
   useEffect(() => {
+    const cachedHospitals = readHospitalsFromCache()
+    if (cachedHospitals.length > 0) {
+      setHospitals(cachedHospitals.slice(0, MAX_HOSPITAL_RESULTS))
+      setLocationStatus((current) =>
+        current === 'Detecting your location...' ? 'Loading live nearby hospitals...' : current,
+      )
+    }
+  }, [readHospitalsFromCache])
+
+  useEffect(() => {
     if (!navigator.geolocation) {
       setUserLocation(FALLBACK_LOCATION)
       setMapTarget(FALLBACK_LOCATION)
@@ -419,47 +582,81 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
 
     let hasCentered = false
 
-    const watchId = navigator.geolocation.watchPosition(
+    navigator.geolocation.getCurrentPosition(
       (position) => {
-        const liveLoc = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
+        const check = shouldAcceptGeoFix(position, lastGeoUpdateRef.current)
+        if (!check.accepted) {
+          setLocationStatus('Waiting for precise GPS fix...')
+          return
         }
-
-        const now = Date.now()
-        const last = lastGeoUpdateRef.current
-        if (last) {
-          const movedKm = calculateDistance(last.location.lat, last.location.lng, liveLoc.lat, liveLoc.lng)
-          const elapsedMs = now - last.ts
-          if (movedKm < MIN_GEO_UPDATE_MOVEMENT_KM && elapsedMs < MIN_GEO_UPDATE_INTERVAL_MS) {
-            return
-          }
-        }
-
-        lastGeoUpdateRef.current = { location: liveLoc, ts: now }
-
-        setUserLocation(liveLoc)
-        setLocationStatus('Live Location Active')
-
-        if (!hasCentered) {
-          setMapTarget(liveLoc)
-          hasCentered = true
-        }
+        applyAcceptedGeoFix(check.location, check.accuracy)
+        setMapTarget(check.location)
+        hasCentered = true
       },
       () => {
-        setUserLocation(FALLBACK_LOCATION)
-        setMapTarget(FALLBACK_LOCATION)
-        setLocationStatus('Location permission denied, showing Vijayawada')
+        // Keep watchPosition active as fallback if one-time lock fails.
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
+        timeout: 12000,
         maximumAge: 0,
       },
     )
 
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const check = shouldAcceptGeoFix(position, lastGeoUpdateRef.current)
+        if (!check.accepted) {
+          if (!lastGeoUpdateRef.current) {
+            setLocationStatus('Waiting for precise GPS fix...')
+          }
+          return
+        }
+
+        applyAcceptedGeoFix(check.location, check.accuracy)
+
+        if (!hasCentered) {
+          setMapTarget(check.location)
+          hasCentered = true
+          return
+        }
+
+        if (!selectedHospital && routePath.length === 0) {
+          setMapTarget(check.location)
+        }
+      },
+      () => {
+        if (!lastGeoUpdateRef.current) {
+          setUserLocation(FALLBACK_LOCATION)
+          setMapTarget(FALLBACK_LOCATION)
+          setLocationStatus('Location permission denied, showing Vijayawada')
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 1000,
+      },
+    )
+
     return () => navigator.geolocation.clearWatch(watchId)
-  }, [])
+  }, [applyAcceptedGeoFix, routePath.length, selectedHospital, shouldAcceptGeoFix])
+
+  useEffect(() => {
+    if (!hospitals.length) {
+      return
+    }
+
+    try {
+      const cachePayload = JSON.stringify({
+        ts: Date.now(),
+        hospitals,
+      })
+      localStorage.setItem(HOSPITAL_CACHE_KEY, cachePayload)
+    } catch {
+      // Ignore localStorage write failures.
+    }
+  }, [hospitals])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -486,72 +683,43 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
     const controller = new AbortController()
 
     const fetchNearbyHospitals = async () => {
+      let hasFastResult = false
+
       try {
         setIsHospitalsLoading(true)
-        const overpassData = await fetchOverpassWithFallback(buildOverpassQuery(userLocation), controller.signal)
 
-        const rawHospitals = overpassData.elements
-          .map((element) => {
-            const tags = element.tags
-            const lat = element.lat ?? element.center?.lat
-            const lng = element.lon ?? element.center?.lon
-            const name = tags?.name?.trim()
-
-            if (!name || typeof lat !== 'number' || typeof lng !== 'number') {
-              return null
-            }
-
-            const km = calculateDistance(userLocation.lat, userLocation.lng, lat, lng)
-            const addressFromTags = formatAddressFromTags(tags)
-
-            return {
-              id: `${element.type}-${element.id}`,
-              name,
-              address: addressFromTags,
-              phone: extractHospitalPhone(tags),
-              openingHours: extractOpeningHours(tags),
-              website: extractHospitalWebsite(tags),
-              lat,
-              lng,
-              location: { lat, lng },
-              distance: `${km.toFixed(1)} km`,
-              rating: Number.isFinite(Number(tags?.stars)) ? Number(tags?.stars) : 0,
-              specialties: parseSpecialties(tags),
-              eta: `${Math.max(4, Math.round((km / 25) * 60))} min`,
-              availableDoctors: 0,
-            } satisfies HospitalData
-          })
-          .filter((hospital): hospital is HospitalData => hospital !== null)
-
-        const dedupeByExactNameAndPoint = rawHospitals.filter(
-          (hospital, index, arr) =>
-            index ===
-            arr.findIndex(
-              (candidate) =>
-                candidate.name.trim().toLowerCase() === hospital.name.trim().toLowerCase() &&
-                candidate.lat.toFixed(6) === hospital.lat.toFixed(6) &&
-                candidate.lng.toFixed(6) === hospital.lng.toFixed(6),
-            ),
-        )
-
-        dedupeByExactNameAndPoint.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance))
-
-        // Collapse repeated nearby aliases (e.g. Jabilli hospital/hospitals variants).
-        const dedupedNearbyAliases = dedupeByExactNameAndPoint.filter((hospital, index, arr) => {
-          return (
-            index ===
-            arr.findIndex((candidate) => {
-              const similarity = nameSimilarity(candidate.name, hospital.name)
-              const spacingKm = calculateDistance(candidate.lat, candidate.lng, hospital.lat, hospital.lng)
-              if (similarity < 0.72) {
-                return false
-              }
-              return spacingKm <= 0.8
-            })
+        try {
+          const fastOverpassData = await fetchOverpassWithFallback(
+            buildOverpassQuery(userLocation, FAST_NEARBY_RADIUS_METERS, FAST_OVERPASS_TIMEOUT_SEC, true),
+            controller.signal,
           )
+          const fastHospitals = normalizeOverpassHospitals(fastOverpassData.elements, userLocation)
+          if (fastHospitals.length > 0) {
+            hasFastResult = true
+            setHospitals((current) => (hasHospitalListChanged(current, fastHospitals) ? fastHospitals : current))
+            setSelectedHospital((current) => {
+              if (!current) {
+                return null
+              }
+              const refreshed = fastHospitals.find((hospital) => hospital.id === current.id)
+              return refreshed || null
+            })
+          }
+        } catch {
+          // Continue to full fetch.
+        }
+
+        const overpassData = await fetchOverpassWithFallback(buildOverpassQuery(userLocation), controller.signal)
+        const nearestHospitals = normalizeOverpassHospitals(overpassData.elements, userLocation)
+        setHospitals((current) => (hasHospitalListChanged(current, nearestHospitals) ? nearestHospitals : current))
+        setSelectedHospital((current) => {
+          if (!current) {
+            return null
+          }
+          const refreshed = nearestHospitals.find((hospital) => hospital.id === current.id)
+          return refreshed || null
         })
 
-        const nearestHospitals = dedupedNearbyAliases.slice(0, 200)
         const missingAddressIds = new Set(
           nearestHospitals
             .filter((hospital) => !hospital.address)
@@ -586,7 +754,9 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
         setLocationStatus((current) =>
           current === 'Live Location Active' ? 'Live Location Active (hospital data temporarily unavailable)' : current,
         )
-        setHospitals([])
+        if (!hasFastResult) {
+          setHospitals([])
+        }
       } finally {
         setIsHospitalsLoading(false)
       }

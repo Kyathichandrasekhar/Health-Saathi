@@ -5,12 +5,26 @@ import { Link } from 'react-router-dom'
 import MapView from '../components/MapView'
 import HospitalCard from '../components/HospitalCard'
 
+const HOSPITAL_CACHE_KEY = 'hs_nearby_hospitals_cache_v1'
+
 export default function Home() {
   const [realHospitals, setRealHospitals] = useState<any[]>([])
   const [isLoadingHospitals, setIsLoadingHospitals] = useState(true)
   const handleHospitalsLoaded = useCallback((hospitals: any[]) => {
     setRealHospitals(hospitals)
     setIsLoadingHospitals(false)
+
+    try {
+      localStorage.setItem(
+        HOSPITAL_CACHE_KEY,
+        JSON.stringify({
+          ts: Date.now(),
+          hospitals,
+        }),
+      )
+    } catch {
+      // Ignore localStorage write failures.
+    }
   }, [])
 
   return (

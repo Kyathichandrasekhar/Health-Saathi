@@ -98,9 +98,9 @@ async function createBooking(req, res) {
     bookingId: aptId,
     user_id: resolvedUserId,
     userId: resolvedUserId,
-    patient_name: patientName || req.user.name || 'Patient',
-    patient_email: patientEmail || req.user.email || 'demo@example.com',
-    patient_phone: patientPhone || req.user.phone_number || '',
+    patient_name: patientName || req.user?.name || 'Patient',
+    patient_email: patientEmail || req.user?.email || 'demo@example.com',
+    patient_phone: patientPhone || req.user?.phone_number || '',
     hospital_id: hospitalId,
     hospital_name: resolvedHospitalName,
     hospitalName: resolvedHospitalName,
@@ -127,7 +127,7 @@ async function createBooking(req, res) {
 }
 
 async function getUserBookings(req, res) {
-  const uid = req.user.uid || 'demo';
+  const uid = req.user?.uid || 'demo_user';
   const bookings = await listAppointmentsByUser(uid);
   res.json(bookings);
 }
