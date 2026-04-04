@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
+import { Scanner, IDetectedBarcode } from '@yudiel/react-qr-scanner'
 import { Camera, CameraOff } from 'lucide-react'
+import { useState } from 'react'
 
 interface QRScannerProps {
   onScan: (data: string) => void
@@ -9,138 +9,69 @@ interface QRScannerProps {
 
 export default function QRScanner({ onScan, onError }: QRScannerProps) {
   const [isScanning, setIsScanning] = useState(false)
-  const [isBusy, setIsBusy] = useState(false)
-  const scannerRef = useRef<Html5Qrcode | null>(null)
-  const scanLockRef = useRef(false)
-  const lastScanRef = useRef<{ value: string; ts: number }>({ value: '', ts: 0 })
-  const containerId = 'qr-reader'
 
-  const ensureScanner = () => {
-    if (!scannerRef.current) {
-      scannerRef.current = new Html5Qrcode(containerId, {
-        verbose: false,
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true
-        }
-      })
-    }
-    return scannerRef.current
+  const toggleScanner = () => {
+    setIsScanning(!isScanning)
   }
 
-  const startScanning = async () => {
-    if (isBusy || isScanning) {
-      return
-    }
-
-    scanLockRef.current = false
-
-    try {
-      setIsBusy(true)
-      const scanner = ensureScanner()
-
-      const cameras = await Html5Qrcode.getCameras()
-      const preferred =
-        cameras.find((camera) => /back|rear|environment/i.test(camera.label)) || cameras[0]
-
-      if (!preferred) {
-        throw new Error('No camera found')
+  const handleScan = (detectedCodes: IDetectedBarcode[]) => {
+    if (detectedCodes.length > 0) {
+      const text = detectedCodes[0].rawValue
+      if (text) {
+        onScan(text)
+        setIsScanning(false)
       }
-
-      await scanner.start(
-        preferred.id,
-        {
-          fps: 10,
-          disableFlip: false,
-        },
-        (decodedText) => {
-          if (scanLockRef.current) {
-            return
-          }
-
-          const now = Date.now()
-          const last = lastScanRef.current
-          if (last.value === decodedText && now - last.ts < 2000) {
-            return
-          }
-
-          scanLockRef.current = true
-          lastScanRef.current = { value: decodedText, ts: now }
-          console.log('QR scanned successfully:', decodedText)
-          onScan(decodedText)
-          
-          // Must be async, otherwise html5-qrcode crashes internal loop by stopping mid-frame
-          setTimeout(() => {
-            stopScanning()
-          }, 0)
-        },
-        () => {} // ignore error frames
-      )
-      setIsScanning(true)
-    } catch (err) {
-      onError?.(`Camera error: ${err}`)
-    } finally {
-      setIsBusy(false)
     }
   }
-
-  const stopScanning = async () => {
-    try {
-      if (scannerRef.current?.isScanning) {
-        await scannerRef.current.stop()
-      }
-      await scannerRef.current?.clear()
-    } catch {
-      // Ignore stop/clear race conditions.
-    }
-
-    setIsScanning(false)
-    scanLockRef.current = false
-  }
-
-  const handleScanFromImage = async (file: File) => {
-    if (!file || isBusy) {
-      return
-    }
-
-    try {
-      setIsBusy(true)
-      const scanner = ensureScanner()
-      const decodedText = await scanner.scanFile(file, true)
-      onScan(decodedText)
-    } catch (err) {
-      onError?.(`Image scan error: ${err}`)
-    } finally {
-      setIsBusy(false)
-    }
-  }
-
-  useEffect(() => {
-    return () => {
-      stopScanning()
-    }
-  }, [])
 
   return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="relative w-full rounded-2xl overflow-hidden bg-dark-800 border border-white/10 aspect-[4/3] sm:aspect-video">
-        <div
-          id={containerId}
-          className="w-full h-full [&>video]:w-full [&>video]:h-full [&>video]:object-cover"
-        />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="w-[72%] max-w-[360px] aspect-square border-2 border-white/80 rounded-2xl shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]" />
-        </div>
+    <div className="flex flex-col items-center gap-4 w-full">
+      <div className="relative w-full rounded-2xl overflow-hidden bg-dark-900/50 border border-white/10 aspect-square sm:aspect-video flex items-center justify-center min-h-[300px]">
+        {isScanning ? (
+          <Scanner
+            onScan={handleScan}
+            onError={(error) => {
+              console.error('Scanner error:', error)
+              onError?.(String(error))
+            }}
+            scanDelay={500}
+            styles={{
+              container: {
+                width: '100%',
+                height: '100%',
+              },
+              video: {
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+              },
+            }}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center text-dark-500 gap-3">
+            <Camera className="w-12 h-12 opacity-20" />
+            <p className="text-sm font-medium">Scanner is ready</p>
+          </div>
+        )}
+
+        {/* Visual Overlay for User Guidance */}
+        {isScanning && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="w-[70%] aspect-square border-2 border-primary-500/50 rounded-2xl shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]" />
+            
+            {/* Animated Scan Line */}
+            <div className="absolute top-1/4 left-[15%] right-[15%] h-[2px] bg-primary-500/80 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-scan-line" />
+          </div>
+        )}
       </div>
 
       <button
-        onClick={isScanning ? stopScanning : startScanning}
-        disabled={isBusy}
-        className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
+        onClick={toggleScanner}
+        className={`flex items-center gap-2 px-8 py-3.5 rounded-xl font-bold transition-all duration-300 shadow-lg ${
           isScanning
             ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-            : 'btn-gradient'
-        } disabled:opacity-60`}
+            : 'btn-gradient hover:scale-[1.02] active:scale-95'
+        }`}
       >
         {isScanning ? (
           <>
@@ -153,21 +84,11 @@ export default function QRScanner({ onScan, onError }: QRScannerProps) {
         )}
       </button>
 
-      <label className="text-xs text-dark-400 cursor-pointer hover:text-dark-300 transition-colors">
-        Scan from image
-        <input
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) {
-              handleScanFromImage(file)
-            }
-            event.currentTarget.value = ''
-          }}
-        />
-      </label>
+      <p className="text-xs text-dark-500 text-center px-4">
+        {isScanning 
+          ? 'Position the QR code within the frame to scan' 
+          : 'Allow camera access to begin scanning patient tickets'}
+      </p>
     </div>
   )
 }

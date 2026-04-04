@@ -176,6 +176,18 @@
     from { opacity: 0; transform: translateY(20px); }
     to { opacity: 1; transform: translateY(0); }
   }
+
+  /* Scan line animation */
+  .animate-scan-line {
+    animation: scan 2s linear infinite;
+  }
+
+  @keyframes scan {
+    0% { top: 25%; opacity: 0; }
+    5% { opacity: 1; }
+    95% { opacity: 1; }
+    100% { top: 75%; opacity: 0; }
+  }
 }
 
 /* ========== Custom Utilities ========== */
