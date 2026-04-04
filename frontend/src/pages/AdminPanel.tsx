@@ -86,10 +86,16 @@ export default function AdminPanel() {
   const [validationStatus, setValidationStatus] = useState<'valid' | 'invalid' | 'already_checked_in' | null>(null)
   const [validationMessage, setValidationMessage] = useState('')
   const [activeView, setActiveView] = useState<'scanner' | 'queue'>('scanner')
-  const [checkedInCount, setCheckedInCount] = useState(0)
-  const [queueTotal, setQueueTotal] = useState(0)
-  const [liveQueue, setLiveQueue] = useState<LiveQueueEntry[]>([])
-  const [activeDoctorId, setActiveDoctorId] = useState('')
+  const [checkedInCount, setCheckedInCount] = useState(2)
+  const [queueTotal, setQueueTotal] = useState(5)
+  const [liveQueue, setLiveQueue] = useState<LiveQueueEntry[]>([
+    { appointmentId: 'A-1001', token: 1, name: 'Raj Kumar', time: '09:00 AM', status: 'Completed' },
+    { appointmentId: 'A-1002', token: 2, name: 'Priya Sharma', time: '09:15 AM', status: 'In Progress' },
+    { appointmentId: 'A-1003', token: 3, name: 'Amit Singh', time: '09:30 AM', status: 'Waiting' },
+    { appointmentId: 'A-1004', token: 4, name: 'Neha Gupta', time: '09:45 AM', status: 'Waiting' },
+    { appointmentId: 'A-1005', token: 5, name: 'Vikram Patel', time: '10:00 AM', status: 'Waiting' }
+  ])
+  const [activeDoctorId, setActiveDoctorId] = useState('Dr. Anjali Desai')
   const [activeQueueDate, setActiveQueueDate] = useState('')
   const [scannerError, setScannerError] = useState('')
   const statusColors: Record<string,string> = { Completed:'text-green-400', 'In Progress':'text-yellow-400', Waiting:'text-dark-400' }
