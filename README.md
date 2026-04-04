@@ -1,4 +1,4 @@
-# 🏥 Health Saathi — Smart Hospital Queue Management System
+# 🏥 Health Saathi — Smart Hospital Queue Management System   https://healthsaathi-ai.vercel.app/
 
 A full-stack web application for hospital queue management, appointment booking, QR ticketing, and AI health assistance.
 
