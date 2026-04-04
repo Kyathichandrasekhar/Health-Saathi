@@ -33,6 +33,8 @@ export default function QRScanner({ onScan, onError }: QRScannerProps) {
       return
     }
 
+    scanLockRef.current = false
+
     try {
       setIsBusy(true)
       const scanner = ensureScanner()
@@ -64,9 +66,13 @@ export default function QRScanner({ onScan, onError }: QRScannerProps) {
 
           scanLockRef.current = true
           lastScanRef.current = { value: decodedText, ts: now }
-          console.log('QR scanned:', decodedText)
+          console.log('QR scanned successfully:', decodedText)
           onScan(decodedText)
-          stopScanning()
+          
+          // Must be async, otherwise html5-qrcode crashes internal loop by stopping mid-frame
+          setTimeout(() => {
+            stopScanning()
+          }, 0)
         },
         () => {} // ignore error frames
       )
