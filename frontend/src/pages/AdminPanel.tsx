@@ -305,15 +305,19 @@ export default function AdminPanel() {
           <motion.div initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} className="glass-card p-6">
             <h2 className="text-xl font-bold text-white mb-4">Today's Queue {activeDoctorId ? `— ${activeDoctorId}` : ''}{activeQueueDate ? ` (${activeQueueDate})` : ''}</h2>
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-white/5"><th className="text-left py-3 px-4 text-dark-400">Token</th><th className="text-left py-3 px-4 text-dark-400">Patient</th><th className="text-left py-3 px-4 text-dark-400">Time</th><th className="text-left py-3 px-4 text-dark-400">Status</th><th className="text-left py-3 px-4 text-dark-400">Action</th></tr></thead>
-              <tbody>{liveQueue.map(q=>(
+              <thead><tr className="border-b border-white/5"><th className="text-left py-3 px-4 text-dark-400">Token</th><th className="text-left py-3 px-4 text-dark-400">Patient</th><th className="text-left py-3 px-4 text-dark-400">Time</th><th className="text-left py-3 px-4 text-dark-400">People Ahead</th><th className="text-left py-3 px-4 text-dark-400">Est. Wait</th><th className="text-left py-3 px-4 text-dark-400">Status</th><th className="text-left py-3 px-4 text-dark-400">Action</th></tr></thead>
+              <tbody>{liveQueue.map((q, index)=>{
+                const peopleAhead = liveQueue.slice(0, index).filter(prev => prev.status !== 'Completed').length;
+                const estWait = peopleAhead * 5;
+                return (
                 <tr key={q.token} className="border-b border-white/3 hover:bg-white/3 transition-colors">
                   <td className="py-3 px-4"><span className="w-8 h-8 rounded-lg bg-primary-500/10 inline-flex items-center justify-center text-primary-300 font-bold">{q.token}</span></td>
                   <td className="py-3 px-4 text-white">{q.name}</td><td className="py-3 px-4 text-dark-400">{q.time}</td>
+                  <td className="py-3 px-4 text-dark-400">{peopleAhead}</td><td className="py-3 px-4 text-dark-400">{estWait} mins</td>
                   <td className={`py-3 px-4 font-medium ${statusColors[q.status]}`}>{q.status}</td>
                   <td className="py-3 px-4">{q.status==='Waiting'&&<button className="px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 text-xs font-medium hover:bg-green-500/20">Call</button>}{q.status==='In Progress'&&<button className="px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Done</button>}</td>
                 </tr>
-              ))}</tbody>
+              )})}</tbody>
             </table>
             {liveQueue.length === 0 && (
               <div className="text-sm text-dark-400 mt-4">No queue entries yet. Scan a patient QR to populate live queue.</div>
