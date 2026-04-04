@@ -70,7 +70,7 @@ interface GeoFix {
 }
 
 const FALLBACK_LOCATION: LatLng = { lat: 16.5062, lng: 80.648 }
-const SEARCH_RADIUS_METERS = 35000
+const SEARCH_RADIUS_METERS = 50000
 const SEARCH_DEBOUNCE_MS = 220
 const MIN_FETCH_MOVEMENT_KM = 0.3
 const MIN_GEO_UPDATE_MOVEMENT_KM = 0.03
@@ -79,12 +79,12 @@ const MAX_ACCEPTABLE_ACCURACY_METERS = 120
 const MAX_COARSE_ACCURACY_WITHOUT_FIX_METERS = 2000
 const MAX_REALISTIC_SPEED_KMH = 250
 const NEARBY_PRIORITY_RADIUS_KM = 12
-const FAST_NEARBY_RADIUS_METERS = 30000
+const FAST_NEARBY_RADIUS_METERS = 40000
 const FAST_OVERPASS_TIMEOUT_SEC = 10
-const MAX_VISIBLE_MARKERS = 150
+const MAX_VISIBLE_MARKERS = 600
 const MAX_REVERSE_GEOCODE_ITEMS = 30
-const MAX_HOSPITAL_RESULTS = 250
-const INITIAL_HOSPITAL_RESULTS = 50
+const MAX_HOSPITAL_RESULTS = 800
+const INITIAL_HOSPITAL_RESULTS = 150
 
 const TILE_SKELETON_MAX_MS = 500
 const HOSPITAL_CACHE_KEY = 'hs_nearby_hospitals_cache_v1'
@@ -498,6 +498,7 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
   const lastFetchedLocationRef = useRef<LatLng | null>(null)
   const lastGeoUpdateRef = useRef<GeoFix | null>(null)
   const routeControllerRef = useRef<AbortController | null>(null)
+  const hasCenteredRef = useRef(false)
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -648,8 +649,6 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
       return
     }
 
-    let hasCentered = false
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const check = shouldAcceptGeoFix(position, lastGeoUpdateRef.current)
@@ -658,8 +657,16 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
           return
         }
         applyAcceptedGeoFix(check.location, check.accuracy)
-        setMapTarget(check.location)
-        hasCentered = true
+        
+        if (!hasCenteredRef.current) {
+          setMapTarget(check.location)
+          hasCenteredRef.current = true
+          return
+        }
+
+        if (!selectedHospital && routePath.length === 0) {
+          setMapTarget(check.location)
+        }
       },
       () => {
         // Keep watchPosition active as fallback if one-time lock fails.
@@ -683,9 +690,9 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
 
         applyAcceptedGeoFix(check.location, check.accuracy)
 
-        if (!hasCentered) {
+        if (!hasCenteredRef.current) {
           setMapTarget(check.location)
-          hasCentered = true
+          hasCenteredRef.current = true
           return
         }
 
