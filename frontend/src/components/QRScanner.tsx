@@ -43,18 +43,11 @@ export default function QRScanner({ onScan, onError }: QRScannerProps) {
       }
 
       await scanner.start(
+        preferred.id,
         {
-          facingMode: { ideal: /back|rear|environment/i.test(preferred.label) ? 'environment' : 'user' },
-        },
-        {
-          fps: 15,
-          qrbox: { width: 300, height: 300 },
-          aspectRatio: 16 / 9,
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
           disableFlip: false,
-          videoConstraints: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
         },
         (decodedText) => {
           if (scanLockRef.current) {
