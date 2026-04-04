@@ -79,13 +79,14 @@ const MAX_ACCEPTABLE_ACCURACY_METERS = 120
 const MAX_COARSE_ACCURACY_WITHOUT_FIX_METERS = 2000
 const MAX_REALISTIC_SPEED_KMH = 250
 const NEARBY_PRIORITY_RADIUS_KM = 12
-const FAST_NEARBY_RADIUS_METERS = 14000
-const FAST_OVERPASS_TIMEOUT_SEC = 6
-const MAX_VISIBLE_MARKERS = 80
-const MAX_REVERSE_GEOCODE_ITEMS = 20
-const MAX_HOSPITAL_RESULTS = 140
-const INITIAL_HOSPITAL_RESULTS = 15
-const TILE_SKELETON_MAX_MS = 1000
+const FAST_NEARBY_RADIUS_METERS = 30000
+const FAST_OVERPASS_TIMEOUT_SEC = 10
+const MAX_VISIBLE_MARKERS = 150
+const MAX_REVERSE_GEOCODE_ITEMS = 30
+const MAX_HOSPITAL_RESULTS = 250
+const INITIAL_HOSPITAL_RESULTS = 50
+
+const TILE_SKELETON_MAX_MS = 500
 const HOSPITAL_CACHE_KEY = 'hs_nearby_hospitals_cache_v1'
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -407,41 +408,42 @@ function normalizeOverpassHospitals(elements: OverpassElement[], center: LatLng)
     })
     .filter((hospital): hospital is HospitalData => hospital !== null)
 
-  const dedupeByExactNameAndPoint = rawHospitals.filter(
-    (hospital, index, arr) =>
-      index ===
-      arr.findIndex(
-        (candidate) =>
-          candidate.name.trim().toLowerCase() === hospital.name.trim().toLowerCase() &&
-          candidate.lat.toFixed(6) === hospital.lat.toFixed(6) &&
-          candidate.lng.toFixed(6) === hospital.lng.toFixed(6),
-      ),
-  )
+  // Sort raw hospitals by distance first so we keep the nearest one among the duplicates
+  rawHospitals.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance))
 
-  dedupeByExactNameAndPoint.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance))
+  const uniqueHospitals: HospitalData[] = []
 
-  const nearbyHospitals = dedupeByExactNameAndPoint.filter(
-    (hospital) => parseFloat(hospital.distance) <= NEARBY_PRIORITY_RADIUS_KM,
-  )
-  const farHospitals = dedupeByExactNameAndPoint.filter(
-    (hospital) => parseFloat(hospital.distance) > NEARBY_PRIORITY_RADIUS_KM,
-  )
+  for (const hospital of rawHospitals) {
+    const isDuplicate = uniqueHospitals.some((existing) => {
+      // Compare names aggressively (ignore common words) to identify fakes/dupes like "Jabilli Hospital" repeats
+      const n1 = existing.name.toLowerCase().replace(/hospital|clinic|care|centre|center|multi|speciality|super/g, '').trim()
+      const n2 = hospital.name.toLowerCase().replace(/hospital|clinic|care|centre|center|multi|speciality|super/g, '').trim()
 
-  const dedupedFarAliases = farHospitals.filter((hospital, index, arr) => {
-    return (
-      index ===
-      arr.findIndex((candidate) => {
-        const similarity = nameSimilarity(candidate.name, hospital.name)
-        const spacingKm = calculateDistance(candidate.lat, candidate.lng, hospital.lat, hospital.lng)
-        if (similarity < 0.72) {
-          return false
-        }
-        return spacingKm <= 0.8
-      })
-    )
-  })
+      const dist = calculateDistance(existing.lat, existing.lng, hospital.lat, hospital.lng)
 
-  return [...nearbyHospitals, ...dedupedFarAliases].slice(0, MAX_HOSPITAL_RESULTS)
+      if (n1 && n2 && n1 === n2) {
+        return dist <= 8.0 // Same core name within 8km -> identical
+      }
+
+      if (nameSimilarity(existing.name, hospital.name) >= 0.75) {
+        return dist <= 4.0 // Highly similar name within 4km -> identical
+      }
+
+      // Exact identical lat/lng
+      if (existing.lat.toFixed(5) === hospital.lat.toFixed(5) && existing.lng.toFixed(5) === hospital.lng.toFixed(5)) {
+        return true
+      }
+
+      return false
+    })
+
+    if (!isDuplicate) {
+      uniqueHospitals.push(hospital)
+    }
+  }
+
+  // Broaden to handle far hospitals automatically
+  return uniqueHospitals.slice(0, MAX_HOSPITAL_RESULTS)
 }
 
 function MapViewportController({ target, animate }: { target: LatLng; animate: boolean }) {
@@ -481,7 +483,7 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
 
   const [userLocation, setUserLocation] = useState<LatLng>(FALLBACK_LOCATION)
   const [locationStatus, setLocationStatus] = useState('Detecting your location...')
-  const [isHospitalsLoading, setIsHospitalsLoading] = useState(false)
+  const [isHospitalsLoading, setIsHospitalsLoading] = useState(true)
   const [isRouting, setIsRouting] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -594,7 +596,6 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
   const handleSelectHospital = useCallback((hospital: HospitalData) => {
     setSelectedHospital(hospital)
     setMapTarget({ lat: hospital.lat, lng: hospital.lng })
-    setLocationStatus(`Navigating to ${hospital.name}...`)
     setShowSuggestions(false)
   }, [])
 
@@ -606,13 +607,36 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
     })
   }, [navigate])
 
+  // IMMEDIATE: Load cached hospitals on mount for instant search
   useEffect(() => {
     const cachedHospitals = readHospitalsFromCache()
     if (cachedHospitals.length > 0) {
       setHospitals(cachedHospitals.slice(0, MAX_HOSPITAL_RESULTS))
+      setIsHospitalsLoading(false)
       setLocationStatus((current) =>
         current === 'Detecting your location...' ? 'Loading live nearby hospitals...' : current,
       )
+    } else {
+      // No cache — start fetching immediately with fallback location
+      // Don't wait for GPS fix (the 1-2 minute delay root cause)
+      const earlyController = new AbortController()
+      fetchOverpassWithFallback(
+        buildOverpassQuery(FALLBACK_LOCATION, FAST_NEARBY_RADIUS_METERS, FAST_OVERPASS_TIMEOUT_SEC, true),
+        earlyController.signal,
+      )
+        .then((data) => {
+          const earlyHospitals = normalizeOverpassHospitals(data.elements, FALLBACK_LOCATION)
+          if (earlyHospitals.length > 0) {
+            setHospitals((current) =>
+              current.length === 0 ? earlyHospitals.slice(0, INITIAL_HOSPITAL_RESULTS) : current,
+            )
+            setIsHospitalsLoading(false)
+          }
+        })
+        .catch(() => {
+          // Will retry after geo fix
+        })
+      return () => earlyController.abort()
     }
   }, [readHospitalsFromCache])
 
@@ -799,8 +823,13 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
         setLocationStatus((current) =>
           current === 'Live Location Active' ? 'Live Location Active (hospital data temporarily unavailable)' : current,
         )
-        if (!hasFastResult) {
-          setHospitals([])
+        // Never wipe hospitals — keep cached/previous data visible
+        if (!hasFastResult && hospitals.length === 0) {
+          // Only if we truly have nothing, try cache one more time
+          const fallback = readHospitalsFromCache()
+          if (fallback.length > 0) {
+            setHospitals(fallback.slice(0, MAX_HOSPITAL_RESULTS))
+          }
         }
       } finally {
         setIsHospitalsLoading(false)
@@ -821,24 +850,50 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
   const filteredHospitals = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
 
+    if (!q) {
+      // No search query — return all hospitals sorted by distance
+      return hospitals.slice(0, 30)
+    }
+
+    // Split query into individual words for multi-word matching
+    const queryWords = q.split(/\s+/).filter(Boolean)
+
     const scored = hospitals
       .map((hospital) => {
-        if (!q) {
-          return { hospital, score: 1 }
-        }
-
-        const name = hospital.name.toLowerCase()
-        const address = hospital.address.toLowerCase()
+        const name = hospital.name.toLowerCase().trim()
+        const address = (hospital.address || '').toLowerCase().trim()
+        const specs = (hospital.specialties || []).join(' ').toLowerCase()
 
         let score = 0
+
+        // Exact substring match in name (strongest signal)
+        if (name.includes(q)) {
+          score += 10
+        }
         if (name.startsWith(q)) {
           score += 5
         }
-        if (name.includes(q)) {
-          score += 3
+
+        // Each query word matches name
+        for (const word of queryWords) {
+          if (name.includes(word)) {
+            score += 3
+          }
         }
+
+        // Address match
         if (address.includes(q)) {
-          score += 1
+          score += 2
+        }
+        for (const word of queryWords) {
+          if (address.includes(word)) {
+            score += 1
+          }
+        }
+
+        // Specialty match
+        if (specs.includes(q)) {
+          score += 2
         }
 
         return { hospital, score }
@@ -851,21 +906,7 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
         return parseFloat(a.hospital.distance) - parseFloat(b.hospital.distance)
       })
 
-    const ordered = scored.map((item) => item.hospital)
-
-    return ordered.filter((hospital, index, arr) => {
-      return (
-        index ===
-        arr.findIndex((candidate) => {
-          const similarity = nameSimilarity(candidate.name, hospital.name)
-          if (similarity < 0.72) {
-            return false
-          }
-          const spacingKm = calculateDistance(candidate.lat, candidate.lng, hospital.lat, hospital.lng)
-          return spacingKm <= 0.8
-        })
-      )
-    })
+    return scored.map((item) => item.hospital)
   }, [hospitals, searchQuery])
 
   const visibleHospitals = useMemo(() => {
@@ -996,17 +1037,23 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => handleNavigateToHospital(selectedHospital)}
+                  onClick={() => {
+                    // Open Google Maps directions (works on all devices)
+                    const url = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${selectedHospital.lat},${selectedHospital.lng}`
+                    window.open(url, '_blank')
+                    // Also draw route on map
+                    handleNavigateToHospital(selectedHospital)
+                  }}
                   className="flex items-center justify-center gap-1 py-2 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors"
                 >
                   <Navigation className="w-3.5 h-3.5" />
-                  {isRouting ? 'Routing...' : 'Navigate'}
+                  Navigate
                 </button>
                 <button
                   onClick={() => handleBookAppointment(selectedHospital)}
                   className="flex items-center justify-center gap-1 py-2 px-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-medium transition-colors"
                 >
-                  Book
+                  Book Now
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -1019,9 +1066,10 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
         <div className="relative w-full">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-400 z-10 pointer-events-none" />
           <input
+            id="hospital-search-input"
             ref={searchInputRef}
             type="text"
-            placeholder="Search hospitals"
+            placeholder="Search hospitals nearby..."
             value={searchInput}
             onChange={(e) => {
               setSearchInput(e.target.value)
@@ -1035,24 +1083,44 @@ function MapView({ onHospitalsLoaded }: MapViewProps) {
           />
 
           {showSuggestions && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-dark-800/95 border border-white/10 rounded-xl shadow-glass backdrop-blur-md max-h-[250px] overflow-y-auto">
-              {isHospitalsLoading ? (
-                <div className="px-4 py-3 text-sm text-dark-300">Loading nearby hospitals...</div>
+            <div className="absolute top-full left-0 right-0 mt-2 bg-dark-800/95 border border-white/10 rounded-xl shadow-glass backdrop-blur-md max-h-[300px] overflow-y-auto z-[900]">
+              {isHospitalsLoading && hospitals.length === 0 ? (
+                <div className="px-4 py-3 text-sm text-dark-300 flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
+                  Discovering nearby hospitals...
+                </div>
               ) : filteredHospitals.length > 0 ? (
-                filteredHospitals.map((hospital) => (
-                  <button
-                    key={hospital.id}
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleSelectHospital(hospital)}
-                    className="w-full text-left px-4 py-3 hover:bg-white/5 transition-colors border-b border-white/5 last:border-b-0"
-                  >
-                    <p className="text-sm text-white font-medium truncate">{hospital.name}</p>
-                    {hospital.address && <p className="text-xs text-dark-300 truncate">{hospital.address}</p>}
-                  </button>
-                ))
+                <>
+                  {searchQuery && (
+                    <div className="px-4 py-2 text-xs text-dark-400 border-b border-white/5">
+                      {filteredHospitals.length} hospital{filteredHospitals.length !== 1 ? 's' : ''} found
+                    </div>
+                  )}
+                  {filteredHospitals.slice(0, 20).map((hospital) => (
+                    <button
+                      key={hospital.id}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => handleSelectHospital(hospital)}
+                      className="w-full text-left px-4 py-3 hover:bg-white/5 transition-colors border-b border-white/5 last:border-b-0"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-white font-medium truncate flex-1">{hospital.name}</p>
+                        <span className="text-xs text-dark-400 ml-2 shrink-0">{hospital.distance}</span>
+                      </div>
+                      {hospital.address && <p className="text-xs text-dark-300 truncate mt-0.5">{hospital.address}</p>}
+                    </button>
+                  ))}
+                </>
+              ) : hospitals.length === 0 ? (
+                <div className="px-4 py-3 text-sm text-dark-300 flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
+                  Loading hospital data...
+                </div>
               ) : (
-                <div className="px-4 py-3 text-sm text-dark-300">No hospitals found</div>
+                <div className="px-4 py-3 text-sm text-dark-300">
+                  No match for "{searchQuery}". Try a different name.
+                </div>
               )}
             </div>
           )}

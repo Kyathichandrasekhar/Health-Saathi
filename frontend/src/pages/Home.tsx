@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Activity } from 'lucide-react'
+import { ArrowRight, Activity, Search } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import HospitalCard from '../components/HospitalCard'
 
@@ -11,7 +11,7 @@ const HOSPITAL_CACHE_KEY = 'hs_nearby_hospitals_cache_v1'
 export default function Home() {
   const [realHospitals, setRealHospitals] = useState<any[]>([])
   const [isLoadingHospitals, setIsLoadingHospitals] = useState(true)
-  const [shouldMountMap, setShouldMountMap] = useState(false)
+  const [shouldMountMap, setShouldMountMap] = useState(true)
   const [showMapSkeleton, setShowMapSkeleton] = useState(true)
 
   useEffect(() => {
@@ -19,17 +19,12 @@ export default function Home() {
       void import('../components/MapView')
     }, 0)
 
-    const mountTimer = window.setTimeout(() => {
-      setShouldMountMap(true)
-    }, 120)
-
     const skeletonTimer = window.setTimeout(() => {
       setShowMapSkeleton(false)
-    }, 1000)
+    }, 600)
 
     return () => {
       window.clearTimeout(prefetchTimer)
-      window.clearTimeout(mountTimer)
       window.clearTimeout(skeletonTimer)
     }
   }, [])
@@ -100,13 +95,19 @@ export default function Home() {
               </p>
 
               <div className="flex flex-col sm:flex-row gap-4 mt-8">
-                <Link
-                  to="/booking"
+                <button
+                  onClick={() => {
+                    const input = document.getElementById('hospital-search-input') as HTMLInputElement | null
+                    if (input) {
+                      input.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                      setTimeout(() => input.focus(), 400)
+                    }
+                  }}
                   className="btn-gradient flex items-center justify-center gap-2 text-base"
                 >
-                  Book Appointment
-                  <ArrowRight className="w-5 h-5" />
-                </Link>
+                  <Search className="w-5 h-5" />
+                  Search Hospitals
+                </button>
                 <Link
                   to="/assistant"
                   className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-white/10 text-white font-semibold hover:bg-white/5 transition-all"

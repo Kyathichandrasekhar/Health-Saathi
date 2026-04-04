@@ -1,5 +1,5 @@
 import { MapPin, Star, Clock, ArrowRight } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 
 interface HospitalCardProps {
   id: string
@@ -10,6 +10,9 @@ interface HospitalCardProps {
   eta?: string
   distance?: string
   availableDoctors: number
+  lat?: number
+  lng?: number
+  location?: { lat: number; lng: number }
 }
 
 export default function HospitalCard({
@@ -21,7 +24,26 @@ export default function HospitalCard({
   eta,
   distance,
   availableDoctors,
+  lat,
+  lng,
+  location,
 }: HospitalCardProps) {
+  const navigate = useNavigate()
+
+  const handleBookNow = () => {
+    navigate('/booking', {
+      state: {
+        preSelectedHospital: {
+          id,
+          name,
+          address,
+          lat: location?.lat ?? lat,
+          lng: location?.lng ?? lng,
+        },
+      },
+    })
+  }
+
   return (
     <div className="glass-card p-6 group cursor-pointer">
       <div className="flex items-start justify-between">
@@ -72,13 +94,13 @@ export default function HospitalCard({
       </div>
 
       {/* Action */}
-      <Link
-        to={`/booking/${id}`}
+      <button
+        onClick={handleBookNow}
         className="mt-4 flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-gradient-to-r from-primary-600/20 to-secondary-600/20 text-white text-sm font-semibold hover:from-primary-600/30 hover:to-secondary-600/30 transition-all duration-300 group/btn"
       >
         Book Appointment
         <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform" />
-      </Link>
+      </button>
     </div>
   )
 }
