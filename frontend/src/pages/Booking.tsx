@@ -5,8 +5,9 @@ import {
   Stethoscope, Clock, Calendar, ChevronRight, Star, MapPin,
   ArrowLeft, Check, CreditCard, Phone, Globe, Building2
 } from 'lucide-react'
-import { bookingAPI, doctorAPI, hospitalAPI, type DoctorProfile, type InternalHospital } from '../services/api'
+import { bookingAPI, doctorAPI, type DoctorProfile, type InternalHospital } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { getHydratedHospitals, warmHospitalsCache } from '../services/hospitalCache'
 
 interface BookingDoctorProfile extends DoctorProfile {
   localSlots?: string[]
@@ -24,11 +25,6 @@ interface MapHospitalProfile {
   location?: { lat: number; lng: number }
 }
 
-const HOSPITAL_CACHE_KEY = 'hs_nearby_hospitals_cache_v1'
-const INTERNAL_HOSPITAL_CACHE_KEY = 'hs_internal_hospitals_cache_v1'
-const MAX_CACHE_HOSPITAL_AGE_MS = 1000 * 60 * 60 * 2
-const INTERNAL_CACHE_HOSPITAL_AGE_MS = 1000 * 60 * 60 * 8
-const HOSPITAL_API_TIMEOUT_MS = 3500
 const FALLBACK_SEARCH_RADIUS_METERS = 50000
 const FALLBACK_OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -83,70 +79,6 @@ function toInternalHospitalFromMap(hospital: MapHospitalProfile | (MapHospitalPr
   }
 }
 
-function readCachedHospitals(): InternalHospital[] {
-  try {
-    const raw = localStorage.getItem(HOSPITAL_CACHE_KEY)
-    if (!raw) {
-      return []
-    }
-
-    const parsed = JSON.parse(raw) as {
-      ts?: number
-      hospitals?: Array<MapHospitalProfile & { distance?: string }>
-    }
-
-    if (!parsed?.ts || Date.now() - parsed.ts > MAX_CACHE_HOSPITAL_AGE_MS) {
-      return []
-    }
-
-    if (!Array.isArray(parsed.hospitals)) {
-      return []
-    }
-
-    return parsed.hospitals
-      .map(toInternalHospitalFromMap)
-      .filter((hospital): hospital is InternalHospital => hospital !== null)
-  } catch {
-    return []
-  }
-}
-
-function readInternalHospitalCache(): InternalHospital[] {
-  try {
-    const raw = localStorage.getItem(INTERNAL_HOSPITAL_CACHE_KEY)
-    if (!raw) {
-      return []
-    }
-
-    const parsed = JSON.parse(raw) as {
-      ts?: number
-      hospitals?: InternalHospital[]
-    }
-
-    if (!parsed?.ts || Date.now() - parsed.ts > INTERNAL_CACHE_HOSPITAL_AGE_MS) {
-      return []
-    }
-
-    return Array.isArray(parsed.hospitals) ? parsed.hospitals : []
-  } catch {
-    return []
-  }
-}
-
-function writeInternalHospitalCache(hospitals: InternalHospital[]) {
-  try {
-    localStorage.setItem(
-      INTERNAL_HOSPITAL_CACHE_KEY,
-      JSON.stringify({
-        ts: Date.now(),
-        hospitals,
-      }),
-    )
-  } catch {
-    // Ignore localStorage write failures.
-  }
-}
-
 function mergeUniqueHospitals(...lists: InternalHospital[][]): InternalHospital[] {
   const seen = new Set<string>()
   const merged: InternalHospital[] = []
@@ -163,24 +95,6 @@ function mergeUniqueHospitals(...lists: InternalHospital[][]): InternalHospital[
   }
 
   return merged
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      reject(new Error(timeoutMessage))
-    }, timeoutMs)
-
-    promise
-      .then((result) => {
-        window.clearTimeout(timer)
-        resolve(result)
-      })
-      .catch((error) => {
-        window.clearTimeout(timer)
-        reject(error)
-      })
-  })
 }
 
 interface FallbackOverpassElement {
@@ -496,8 +410,13 @@ function buildLocalBookingFallback(input: {
   }
 }
 
+function getInitialHospitalList() {
+  const hydrated = getHydratedHospitals()
+  return hydrated.length > 0 ? hydrated : FALLBACK_HOSPITALS
+}
+
 export default function Booking() {
-  const [allHospitals, setAllHospitals] = useState<InternalHospital[]>([])
+  const [allHospitals, setAllHospitals] = useState<InternalHospital[]>(getInitialHospitalList)
   const [step, setStep] = useState(1)
   const [selectedHospital, setSelectedHospital] = useState('')
   const [selectedDoctor, setSelectedDoctor] = useState('')
@@ -506,7 +425,7 @@ export default function Booking() {
   const [mapHospital, setMapHospital] = useState<MapHospitalProfile | null>(null)
   const [hospitalDoctors, setHospitalDoctors] = useState<BookingDoctorProfile[]>([])
   const [availableSlots, setAvailableSlots] = useState<string[]>([])
-  const [hospitalLoading, setHospitalLoading] = useState(true)
+  const [hospitalLoading, setHospitalLoading] = useState(false)
   const [doctorLoading, setDoctorLoading] = useState(false)
   const [slotLoading, setSlotLoading] = useState(false)
   const [bookingError, setBookingError] = useState('')
@@ -519,13 +438,12 @@ export default function Booking() {
   useEffect(() => {
     let mounted = true
     const preSelected = location.state?.preSelectedHospital as MapHospitalProfile | undefined
-    const cachedInternalHospitals = readInternalHospitalCache()
-    const cachedNearbyHospitals = readCachedHospitals()
+    const hydratedHospitals = getHydratedHospitals()
     const preSelectedAsInternal = preSelected ? toInternalHospitalFromMap(preSelected) : null
     const immediateHospitals = mergeUniqueHospitals(
       preSelectedAsInternal ? [preSelectedAsInternal] : [],
-      cachedInternalHospitals,
-      cachedNearbyHospitals,
+      hydratedHospitals,
+      FALLBACK_HOSPITALS,
     )
 
     if (preSelected) {
@@ -534,23 +452,17 @@ export default function Booking() {
       setStep(2)
     }
 
-    if (immediateHospitals.length > 0) {
-      setAllHospitals(immediateHospitals)
-      setHospitalLoading(false)
-    }
+    setAllHospitals(immediateHospitals)
+    setHospitalLoading(false)
 
     const loadHospitals = async () => {
       try {
-        const internalHospitals = await withTimeout(
-          hospitalAPI.getAll(),
-          HOSPITAL_API_TIMEOUT_MS,
-          'Hospital list request timed out',
-        )
+        setHospitalLoading(true)
+        const internalHospitals = await warmHospitalsCache()
         if (!mounted) {
           return
         }
         setAllHospitals(mergeUniqueHospitals(preSelectedAsInternal ? [preSelectedAsInternal] : [], internalHospitals))
-        writeInternalHospitalCache(internalHospitals)
         setBookingError('')
 
         if (preSelected) {
@@ -902,10 +814,23 @@ export default function Booking() {
             className="space-y-4"
           >
             <h2 className="text-xl font-semibold text-white mb-4">Select Hospital</h2>
-            {hospitalLoading && <div className="text-sm text-dark-300">Loading hospitals...</div>}
-            {allHospitals.map((hospital) => (
-              <button
+            {hospitalLoading && allHospitals.length === 0 && (
+              <div className="space-y-3 animate-pulse">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="glass-card p-5">
+                    <div className="h-5 w-2/3 rounded bg-white/10" />
+                    <div className="mt-2 h-4 w-full rounded bg-white/10" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {allHospitals.map((hospital, index) => (
+              <motion.button
                 key={hospital.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, delay: Math.min(index * 0.03, 0.24) }}
                 onClick={() => {
                   setMapHospital(null)
                   setSelectedHospital(hospital.id)
@@ -925,7 +850,7 @@ export default function Booking() {
                   </div>
                 </div>
                 <ChevronRight className="w-5 h-5 text-dark-500 group-hover:text-primary-400 transition-colors" />
-              </button>
+              </motion.button>
             ))}
           </motion.div>
         )}

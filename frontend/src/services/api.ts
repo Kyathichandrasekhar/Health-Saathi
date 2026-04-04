@@ -203,8 +203,20 @@ export const hospitalAPI = {
   getById: (id: string) =>
     apiFetch<InternalHospital>(`/hospitals/${id}`),
 
-  getAll: () =>
-    apiFetch<InternalHospital[]>('/hospitals'),
+  getAll: (options?: { limit?: number; compact?: boolean }) => {
+    const params = new URLSearchParams()
+
+    if (typeof options?.limit === 'number' && options.limit > 0) {
+      params.set('limit', String(Math.floor(options.limit)))
+    }
+
+    if (options?.compact) {
+      params.set('compact', '1')
+    }
+
+    const query = params.toString()
+    return apiFetch<InternalHospital[]>(`/hospitals${query ? `?${query}` : ''}`)
+  },
 }
 
 // ========== Doctor APIs ==========

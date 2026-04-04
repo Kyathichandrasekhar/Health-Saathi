@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, Activity } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -11,6 +11,46 @@ const HOSPITAL_CACHE_KEY = 'hs_nearby_hospitals_cache_v1'
 export default function Home() {
   const [realHospitals, setRealHospitals] = useState<any[]>([])
   const [isLoadingHospitals, setIsLoadingHospitals] = useState(true)
+  const [shouldMountMap, setShouldMountMap] = useState(false)
+  const [showMapSkeleton, setShowMapSkeleton] = useState(true)
+
+  useEffect(() => {
+    const prefetchTimer = window.setTimeout(() => {
+      void import('../components/MapView')
+    }, 0)
+
+    const mountTimer = window.setTimeout(() => {
+      setShouldMountMap(true)
+    }, 120)
+
+    const skeletonTimer = window.setTimeout(() => {
+      setShowMapSkeleton(false)
+    }, 1000)
+
+    return () => {
+      window.clearTimeout(prefetchTimer)
+      window.clearTimeout(mountTimer)
+      window.clearTimeout(skeletonTimer)
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(HOSPITAL_CACHE_KEY)
+      if (!cached) {
+        return
+      }
+
+      const parsed = JSON.parse(cached) as { hospitals?: any[] }
+      if (Array.isArray(parsed?.hospitals) && parsed.hospitals.length > 0) {
+        setRealHospitals(parsed.hospitals)
+        setIsLoadingHospitals(false)
+      }
+    } catch {
+      // Ignore localStorage read failures.
+    }
+  }, [])
+
   const handleHospitalsLoaded = useCallback((hospitals: any[]) => {
     setRealHospitals(hospitals)
     setIsLoadingHospitals(false)
@@ -82,21 +122,25 @@ export default function Home() {
               initial={{ opacity: 0, x: 30 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.6, delay: 0.2 }}
-              className="h-[500px] rounded-2xl overflow-hidden shadow-glass-lg"
+              className="relative h-[500px] rounded-2xl overflow-hidden shadow-glass-lg"
             >
-              <Suspense
-                fallback={
-                  <div className="h-full w-full bg-dark-900/80 animate-pulse">
-                    <div className="h-full w-full grid grid-cols-3 gap-2 p-4 opacity-60">
-                      {Array.from({ length: 12 }).map((_, i) => (
-                        <div key={i} className="rounded-xl bg-white/5" />
-                      ))}
-                    </div>
+              {shouldMountMap ? (
+                <Suspense fallback={<div className="h-full w-full bg-dark-900/80" />}>
+                  <MapView onHospitalsLoaded={handleHospitalsLoaded} />
+                </Suspense>
+              ) : (
+                <div className="h-full w-full bg-dark-900/80" />
+              )}
+
+              {showMapSkeleton && (
+                <div className="absolute inset-0 z-10 h-full w-full bg-dark-900/80 animate-pulse pointer-events-none">
+                  <div className="h-full w-full grid grid-cols-3 gap-2 p-4 opacity-60">
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <div key={i} className="rounded-xl bg-white/5" />
+                    ))}
                   </div>
-                }
-              >
-                <MapView onHospitalsLoaded={handleHospitalsLoaded} />
-              </Suspense>
+                </div>
+              )}
             </motion.div>
           </div>
         </div>

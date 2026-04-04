@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import Navbar from './components/Navbar'
@@ -11,8 +12,15 @@ import Dashboard from './pages/Dashboard'
 import AdminPanel from './pages/AdminPanel'
 import Assistant from './pages/Assistant'
 import ProtectedRoute from './components/ProtectedRoute'
+import { warmHospitalsCache } from './services/hospitalCache'
 
 function App() {
+  useEffect(() => {
+    warmHospitalsCache().catch(() => {
+      // Keep startup resilient when backend is slow/unavailable.
+    })
+  }, [])
+
   return (
     <div className="min-h-screen gradient-bg">
       <Navbar />

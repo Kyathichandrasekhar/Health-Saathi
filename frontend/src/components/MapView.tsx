@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { ArrowRight, Clock, MapPin, Navigation, Search } from 'lucide-react'
@@ -81,9 +81,11 @@ const MAX_REALISTIC_SPEED_KMH = 250
 const NEARBY_PRIORITY_RADIUS_KM = 12
 const FAST_NEARBY_RADIUS_METERS = 14000
 const FAST_OVERPASS_TIMEOUT_SEC = 6
-const MAX_VISIBLE_MARKERS = 120
+const MAX_VISIBLE_MARKERS = 80
 const MAX_REVERSE_GEOCODE_ITEMS = 20
 const MAX_HOSPITAL_RESULTS = 140
+const INITIAL_HOSPITAL_RESULTS = 15
+const TILE_SKELETON_MAX_MS = 1000
 const HOSPITAL_CACHE_KEY = 'hs_nearby_hospitals_cache_v1'
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -474,7 +476,7 @@ function RouteViewportController({ route }: { route: LatLng[] }) {
   return null
 }
 
-export default function MapView({ onHospitalsLoaded }: MapViewProps) {
+function MapView({ onHospitalsLoaded }: MapViewProps) {
   const navigate = useNavigate()
 
   const [userLocation, setUserLocation] = useState<LatLng>(FALLBACK_LOCATION)
@@ -489,10 +491,41 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
   const [hospitals, setHospitals] = useState<HospitalData[]>([])
   const [routePath, setRoutePath] = useState<LatLng[]>([])
   const [isMapTilesReady, setIsMapTilesReady] = useState(false)
+  const [showTileSkeleton, setShowTileSkeleton] = useState(true)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const lastFetchedLocationRef = useRef<LatLng | null>(null)
   const lastGeoUpdateRef = useRef<GeoFix | null>(null)
   const routeControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setShowTileSkeleton(false)
+    }, TILE_SKELETON_MAX_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    const hosts = ['https://tile.openstreetmap.org', 'https://a.tile.openstreetmap.org']
+    const createdLinks: HTMLLinkElement[] = []
+
+    hosts.forEach((host) => {
+      const link = document.createElement('link')
+      link.rel = 'preconnect'
+      link.href = host
+      link.crossOrigin = 'anonymous'
+      document.head.appendChild(link)
+      createdLinks.push(link)
+    })
+
+    return () => {
+      createdLinks.forEach((link) => {
+        if (document.head.contains(link)) {
+          document.head.removeChild(link)
+        }
+      })
+    }
+  }, [])
 
   const readHospitalsFromCache = useCallback(() => {
     try {
@@ -705,14 +738,15 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
             controller.signal,
           )
           const fastHospitals = normalizeOverpassHospitals(fastOverpassData.elements, userLocation)
+          const immediateHospitals = fastHospitals.slice(0, INITIAL_HOSPITAL_RESULTS)
           if (fastHospitals.length > 0) {
             hasFastResult = true
-            setHospitals((current) => (hasHospitalListChanged(current, fastHospitals) ? fastHospitals : current))
+            setHospitals((current) => (hasHospitalListChanged(current, immediateHospitals) ? immediateHospitals : current))
             setSelectedHospital((current) => {
               if (!current) {
                 return null
               }
-              const refreshed = fastHospitals.find((hospital) => hospital.id === current.id)
+              const refreshed = immediateHospitals.find((hospital) => hospital.id === current.id)
               return refreshed || null
             })
           }
@@ -889,13 +923,19 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
 
   return (
     <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-glass-lg">
-      <MapContainer center={[mapTarget.lat, mapTarget.lng]} zoom={15} className="w-full h-full" zoomControl={true}>
+      <MapContainer
+        center={[mapTarget.lat, mapTarget.lng]}
+        zoom={15}
+        className="w-full h-full"
+        zoomControl={true}
+        preferCanvas={true}
+      >
         <MapViewportController target={mapTarget} animate={Boolean(selectedHospital) || routePath.length > 0} />
         <RouteViewportController route={routePath} />
 
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           eventHandlers={{
             load: () => setIsMapTilesReady(true),
           }}
@@ -916,6 +956,8 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
 
         <MarkerClusterGroup
           chunkedLoading
+          chunkInterval={120}
+          chunkDelay={0}
           removeOutsideVisibleBounds
           maxClusterRadius={38}
           spiderfyOnMaxZoom
@@ -1017,7 +1059,7 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
         </div>
       </div>
 
-      {(!isMapTilesReady || isHospitalsLoading) && (
+      {!isMapTilesReady && showTileSkeleton && (
         <div className="absolute inset-0 z-[700] pointer-events-none bg-dark-900/45 backdrop-blur-[1px]">
           <div className="h-full w-full p-4 grid grid-cols-3 gap-2 animate-pulse opacity-70">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -1051,3 +1093,5 @@ export default function MapView({ onHospitalsLoaded }: MapViewProps) {
     </div>
   )
 }
+
+export default memo(MapView)
