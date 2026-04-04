@@ -20,6 +20,9 @@ export default function QRScanner({ onScan, onError }: QRScannerProps) {
       scannerRef.current = new Html5Qrcode(containerId, {
         verbose: false,
         formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        }
       })
     }
     return scannerRef.current
@@ -114,10 +117,10 @@ export default function QRScanner({ onScan, onError }: QRScannerProps) {
 
   return (
     <div className="flex flex-col items-center gap-4">
-      <div className="relative w-full rounded-2xl overflow-hidden bg-dark-800 border border-white/10">
+      <div className="relative w-full rounded-2xl overflow-hidden bg-dark-800 border border-white/10 aspect-[4/3] sm:aspect-video">
         <div
           id={containerId}
-          className="w-full h-[300px] md:h-[420px]"
+          className="w-full h-full [&>video]:w-full [&>video]:h-full [&>video]:object-cover"
         />
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div className="w-[72%] max-w-[360px] aspect-square border-2 border-white/80 rounded-2xl shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]" />
