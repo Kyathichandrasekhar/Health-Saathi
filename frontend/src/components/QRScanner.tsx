@@ -46,7 +46,6 @@ export default function QRScanner({ onScan, onError }: QRScannerProps) {
         preferred.id,
         {
           fps: 10,
-          qrbox: { width: 250, height: 250 },
           disableFlip: false,
         },
         (decodedText) => {
