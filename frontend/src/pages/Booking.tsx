@@ -438,6 +438,9 @@ export default function Booking() {
   useEffect(() => {
     let mounted = true
     const preSelected = location.state?.preSelectedHospital as MapHospitalProfile | undefined
+    const preSelectedDoctor = location.state?.preSelectedDoctor as any | undefined
+    const preSelectedTime = location.state?.preSelectedTime as string | undefined
+
     const hydratedHospitals = getHydratedHospitals()
     const preSelectedAsInternal = preSelected ? toInternalHospitalFromMap(preSelected) : null
     const immediateHospitals = mergeUniqueHospitals(
@@ -446,7 +449,39 @@ export default function Booking() {
       FALLBACK_HOSPITALS,
     )
 
-    if (preSelected) {
+    if (preSelectedDoctor) {
+      const doctorProfile: BookingDoctorProfile = {
+        id: preSelectedDoctor.id,
+        name: preSelectedDoctor.name,
+        specialty: preSelectedDoctor.specialization,
+        specialization: preSelectedDoctor.specialization,
+        rating: preSelectedDoctor.rating,
+        experience: `${preSelectedDoctor.experience} yrs`,
+        fee: preSelectedDoctor.consultationFee,
+        contact_number: preSelectedDoctor.phone,
+        slot_timings: preSelectedDoctor.availability,
+        localSlots: preSelectedDoctor.availableSlots || ['09:00 AM', '10:30 AM', '02:00 PM', '04:30 PM'],
+      }
+
+      const hospObj: MapHospitalProfile = preSelected || {
+        id: preSelectedDoctor.hospitalId || 'hosp-1',
+        name: preSelectedDoctor.hospitalName || 'Hospital',
+        address: preSelectedDoctor.hospitalName || 'Address',
+        lat: preSelectedDoctor.latitude,
+        lng: preSelectedDoctor.longitude,
+      }
+
+      setMapHospital(hospObj)
+      setSelectedHospital(`map-${hospObj.id}`)
+      setHospitalDoctors([doctorProfile])
+      setSelectedDoctor(doctorProfile.id)
+
+      const todayStr = new Date().toISOString().split('T')[0]
+      setSelectedDate(todayStr)
+      setSelectedSlot(preSelectedTime || doctorProfile.localSlots?.[0] || '10:00 AM')
+      setAvailableSlots(doctorProfile.localSlots || ['09:00 AM', '10:30 AM', '02:00 PM'])
+      setStep(3)
+    } else if (preSelected) {
       setMapHospital(preSelected)
       setSelectedHospital(`map-${preSelected.id}`)
       setStep(2)
@@ -503,6 +538,10 @@ export default function Booking() {
   }, [location.state])
 
   useEffect(() => {
+    if (location.state?.preSelectedDoctor) {
+      return
+    }
+
     if (!selectedHospital && !effectiveHospitalName) {
       setHospitalDoctors([])
       setSelectedDoctor('')
