@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, MapPin, Phone, Building2, User, Star, Calendar, ArrowRight, Stethoscope } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Doctor } from '../types/doctor'
+import DoctorIcon from './DoctorIcon'
 import { SampleHospital } from '../services/doctorData'
 
 interface HospitalDetailsModalProps {
@@ -136,10 +137,10 @@ export default function HospitalDetailsModal({
                       onClick={() => onSelectDoctor?.(docItem)}
                       className="p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-primary-500/30 transition-all cursor-pointer flex items-center gap-3 group"
                     >
-                      <img
-                        src={docItem.profileImage}
-                        alt={docItem.name}
-                        className="w-12 h-12 rounded-xl object-cover border border-white/10 shrink-0"
+                      <DoctorIcon 
+                        specialization={docItem.specialization} 
+                        wrapperClassName="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center shrink-0 border border-white/10"
+                        className="w-6 h-6 text-white"
                       />
                       <div className="flex-1 min-w-0">
                         <h4 className="text-sm font-bold text-white group-hover:text-primary-300 truncate">

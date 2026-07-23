@@ -31,11 +31,11 @@ function normalizeDoctorFromDoc(id: string, data: any): Doctor {
     consultationFee: Number(data.consultationFee || data.fee) || 500,
     availableToday: data.availableToday ?? (data.availability === 'Today' || true),
     availability: (data.availability as any) || 'Today',
-    profileImage: data.image || data.profileImage || 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=300&q=80',
     qualification: data.qualification || 'MBBS',
     languages: Array.isArray(data.languages) ? data.languages : ['English', 'Telugu'],
     phone: data.phone || '+91 98480 00000',
     gender: data.gender || 'Male',
+    patientsServed: Number(data.patientsServed) || 500,
     availableSlots: Array.isArray(data.availableSlots) ? data.availableSlots : ['10:00 AM', '02:00 PM'],
   }
 }
@@ -53,8 +53,8 @@ function toFirestoreDoctorDoc(doctor: Doctor) {
     rating: doctor.rating,
     qualification: doctor.qualification,
     languages: doctor.languages,
-    image: doctor.profileImage,
     phone: doctor.phone,
+    patientsServed: doctor.patientsServed,
     latitude: doctor.latitude,
     longitude: doctor.longitude,
     availableToday: doctor.availableToday,
@@ -101,120 +101,38 @@ export function clearDoctorsMemoryCache() {
 
 // Fetch all doctors from Firestore with local fallback
 export async function getDoctors(): Promise<Doctor[]> {
-  // 1. Hot path: in-memory cache (same tab, no Firestore round-trip)
   if (_doctorsMemoryCache !== null) {
     return _doctorsMemoryCache
   }
-
-  // 2. Deduplicate concurrent callers — return the same in-flight promise
-  if (_fetchPromise) {
-    return _fetchPromise
-  }
-
-  _fetchPromise = (async () => {
-    try {
-      const docsSnap = await getDocs(collection(db, DOCTORS_COLLECTION))
-      if (!docsSnap.empty) {
-        // FORCE WIPE AND RESEED for dataset migration
-        if (localStorage.getItem('did_migrate_v2') !== 'true') {
-           localStorage.setItem('did_migrate_v2', 'true')
-           await seedInitialDataIfNeeded()
-        }
-
-        const docs = docsSnap.docs.map((docSnap) =>
-          normalizeDoctorFromDoc(docSnap.id, docSnap.data())
-        )
-        saveLocalDoctorsCache(docs)
-        _doctorsMemoryCache = docs
-        return docs
-      }
-      // If Firestore collection is empty, trigger seed in background and return sample
-      void seedInitialDataIfNeeded()
-    } catch {
-      // Fallback if Firestore read fails
-    }
-
-    const local = getLocalDoctorsCache()
+  
+  const local = getLocalDoctorsCache()
+  if (local.length > 0) {
     _doctorsMemoryCache = local
     return local
-  })()
-
-  try {
-    return await _fetchPromise
-  } finally {
-    // Clear promise slot so errors can retry but successes stay cached
-    _fetchPromise = null
   }
+
+  // Fallback to purely local dataset for hackathon
+  _doctorsMemoryCache = SAMPLE_DOCTORS
+  saveLocalDoctorsCache(SAMPLE_DOCTORS)
+  return SAMPLE_DOCTORS
 }
 
 
 // Fetch all hospitals from Firestore
 export async function getFirestoreHospitals(): Promise<SampleHospital[]> {
-  try {
-    const querySnapshot = await getDocs(collection(db, HOSPITALS_COLLECTION))
-    if (!querySnapshot.empty) {
-      return querySnapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...(docSnap.data() as Omit<SampleHospital, 'id'>),
-      }))
-    }
-  } catch {
-    // Fallback
-  }
   return SAMPLE_HOSPITALS
 }
 
 // Seed initial data into Firestore if empty
 export async function seedInitialDataIfNeeded() {
-  try {
-    const docsSnap = await getDocs(collection(db, DOCTORS_COLLECTION))
-    
-    // Wipe old doctors to apply new dataset
-    for (const docSnap of docsSnap.docs) {
-      await deleteDoc(docSnap.ref)
-    }
-    
-    // Wipe old hospitals
-    const hospSnap = await getDocs(collection(db, HOSPITALS_COLLECTION))
-    for (const docSnap of hospSnap.docs) {
-      await deleteDoc(docSnap.ref)
-    }
-
-    // Seed hospitals
-    for (const hosp of SAMPLE_HOSPITALS) {
-      await setDoc(doc(db, HOSPITALS_COLLECTION, hosp.id), {
-        hospitalId: hosp.id,
-        name: hosp.name,
-        address: hosp.address,
-        latitude: hosp.latitude,
-        longitude: hosp.longitude,
-        departments: hosp.departments,
-        phone: hosp.phone,
-        rating: hosp.rating,
-      })
-    }
-
-    // Seed doctors
-    for (const docItem of SAMPLE_DOCTORS) {
-      await setDoc(doc(db, DOCTORS_COLLECTION, docItem.id), toFirestoreDoctorDoc(docItem))
-    }
-  } catch (error) {
-    console.error('Seed error', error)
-  }
+  // Disabled for hackathon purely local demo mode
 }
 
 // Add new doctor (Firestore + Local)
 export async function addDoctor(doctor: Doctor): Promise<Doctor> {
-  const docRef = doc(collection(db, DOCTORS_COLLECTION))
   const newDoctor: Doctor = {
     ...doctor,
-    id: docRef.id || `doc-${Date.now()}`,
-  }
-
-  try {
-    await setDoc(docRef, toFirestoreDoctorDoc(newDoctor))
-  } catch {
-    // Firestore write error handled gracefully
+    id: `doc-${Date.now()}`,
   }
 
   const currentCache = getLocalDoctorsCache()
@@ -232,14 +150,7 @@ export async function updateDoctor(doctorId: string, updates: Partial<Doctor>): 
   if (index === -1) return null
 
   const updatedDoctor = { ...currentCache[index], ...updates }
-
-  try {
-    const docRef = doc(db, DOCTORS_COLLECTION, doctorId)
-    await updateDoc(docRef, toFirestoreDoctorDoc(updatedDoctor))
-  } catch {
-    // Ignore Firestore write error
-  }
-
+  
   currentCache[index] = updatedDoctor
   saveLocalDoctorsCache(currentCache)
   _doctorsMemoryCache = [...currentCache]  // invalidate in-memory cache
@@ -249,13 +160,6 @@ export async function updateDoctor(doctorId: string, updates: Partial<Doctor>): 
 
 // Delete doctor
 export async function deleteDoctor(doctorId: string): Promise<boolean> {
-  try {
-    const docRef = doc(db, DOCTORS_COLLECTION, doctorId)
-    await deleteDoc(docRef)
-  } catch {
-    // Ignore Firestore delete error
-  }
-
   const currentCache = getLocalDoctorsCache()
   const filtered = currentCache.filter((d) => d.id !== doctorId)
   saveLocalDoctorsCache(filtered)

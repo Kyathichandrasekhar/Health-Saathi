@@ -11,11 +11,11 @@ export interface Doctor {
   consultationFee: number
   availableToday: boolean
   availability: 'Today' | 'Tomorrow' | 'Weekend'
-  profileImage: string
   qualification: string
   languages: string[]
   phone: string
   gender: 'Male' | 'Female'
+  patientsServed: number
   availableSlots?: string[]
 }
 
@@ -31,20 +31,26 @@ export interface DoctorFilterOptions {
 }
 
 export const SPECIALIZATIONS = [
-  'Cardiologist',
-  'Neurologist',
-  'Orthopedic',
-  'Dentist',
-  'Dermatologist',
+  'Pulmonology',
+  'General Medicine',
+  'Neurosurgery',
+  'Surgery/Orthopedics',
+  'Consultant',
+  'Spine Surgery',
+  'Pediatrics',
+  'Neuro Psychiatry',
+  'Cardiology/Vascular',
+  'Gastroenterology',
+  'Gynecology',
+  'Surgical Gastroenterology',
   'ENT',
-  'Pediatrician',
-  'Gynecologist',
-  'Psychiatrist',
-  'General Physician',
-  'Ophthalmologist',
-  'Pulmonologist',
-  'Nephrologist',
-  'Urologist',
+  'Cardiology',
+  'Orthopedics',
+  'General Surgery',
+  'Sports Medicine',
+  'Neuro/Spine Surgery',
+  'Pediatric Surgery',
+  'Dental'
 ] as const
 
 export type SpecializationCategory = typeof SPECIALIZATIONS[number]

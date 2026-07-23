@@ -8,7 +8,8 @@ import 'leaflet/dist/leaflet.css'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 
-import { Doctor, SPECIALIZATIONS } from '../types/doctor'
+import { DoctorFilterOptions, Doctor, SPECIALIZATIONS } from '../types/doctor'
+import DoctorIcon from './DoctorIcon'
 
 interface MapViewProps {
   onHospitalsLoaded?: (hospitals: HospitalData[]) => void
@@ -1116,10 +1117,10 @@ function MapView({
           >
             <div className="px-1 py-1 text-dark-900 max-w-xs min-w-[240px]">
               <div className="flex items-start gap-2.5 mb-2">
-                <img
-                  src={activeDoctor.profileImage}
-                  alt={activeDoctor.name}
-                  className="w-10 h-10 rounded-lg object-cover border shrink-0"
+                <DoctorIcon 
+                  specialization={activeDoctor.specialization} 
+                  wrapperClassName="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center shrink-0 border border-gray-200"
+                  className="w-5 h-5 text-white"
                 />
                 <div>
                   <h3 className="font-bold text-sm text-gray-900 leading-tight">{activeDoctor.name}</h3>
@@ -1307,14 +1308,10 @@ function MapView({
                             className="w-full text-left px-3 py-2.5 hover:bg-white/5 rounded-xl transition-colors"
                           >
                             <div className="flex items-start gap-3">
-                              <img
-                                src={docItem.profileImage}
-                                alt={docItem.name}
-                                className="w-9 h-9 rounded-lg object-cover border border-white/10 shrink-0 mt-0.5"
-                                onError={(e) => {
-                                  ;(e.target as HTMLImageElement).src =
-                                    'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=300&q=80'
-                                }}
+                              <DoctorIcon 
+                                specialization={docItem.specialization} 
+                                wrapperClassName="w-9 h-9 rounded-lg bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center shrink-0 border border-white/10 mt-0.5"
+                                className="w-4 h-4 text-white"
                               />
                               <div className="flex-1 min-w-0">
                                 {/* Row 1: Name + availability badge */}

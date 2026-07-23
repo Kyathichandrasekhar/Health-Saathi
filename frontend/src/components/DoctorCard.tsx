@@ -1,6 +1,7 @@
 import { MapPin, Star, Award, IndianRupee, Clock, Navigation, ArrowRight, UserCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Doctor } from '../types/doctor'
+import DoctorIcon from './DoctorIcon'
 
 interface DoctorCardProps {
   doctor: Doctor
@@ -55,16 +56,7 @@ export default function DoctorCard({
         {/* Header: Photo + Info + Rating */}
         <div className="flex items-start gap-4">
           <div className="relative shrink-0">
-            <img
-              src={doctor.profileImage}
-              alt={doctor.name}
-              className="w-16 h-16 rounded-2xl object-cover border-2 border-primary-500/20 group-hover:border-primary-500/50 transition-colors shadow-lg"
-              onError={(e) => {
-                // Fallback avatar
-                ;(e.target as HTMLImageElement).src =
-                  'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=300&q=80'
-              }}
-            />
+            <DoctorIcon specialization={doctor.specialization} />
             {doctor.availableToday && (
               <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-dark-900 rounded-full" title="Available Today" />
             )}

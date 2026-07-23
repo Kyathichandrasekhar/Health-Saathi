@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { QrCode, CheckCircle, XCircle, Users, Clock, UserCheck, RefreshCw, Shield, Printer, Stethoscope, Plus, Pencil, Trash2, X, Save, Lock } from 'lucide-react'
 import QRScanner from '../components/QRScanner'
+import DoctorIcon from '../components/DoctorIcon'
 import { adminAPI, bookingAPI, queueAPI } from '../services/api'
 import { Doctor, SPECIALIZATIONS } from '../types/doctor'
-import { getDoctors, addDoctor, updateDoctor, deleteDoctor, getFirestoreHospitals, seedInitialDataIfNeeded } from '../services/doctorFirestore'
+import { getDoctors, getFirestoreHospitals, addDoctor, updateDoctor, deleteDoctor } from '../services/doctorFirestore'
 import { SAMPLE_HOSPITALS, SampleHospital } from '../services/doctorData'
 
 interface ScannedPatient {
@@ -285,7 +286,6 @@ export default function AdminPanel() {
   const loadAllDoctors = async () => {
     setIsDoctorsLoading(true)
     try {
-      await seedInitialDataIfNeeded()
       const docs = await getDoctors()
       const hosps = await getFirestoreHospitals()
       setAllDoctors(docs)
@@ -315,7 +315,6 @@ export default function AdminPanel() {
       languages: ['English', 'Telugu'],
       latitude: sampleHospitals[0]?.latitude || 16.5062,
       longitude: sampleHospitals[0]?.longitude || 80.648,
-      profileImage: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=300&q=80',
       availableSlots: ['09:00 AM', '11:00 AM', '02:00 PM', '04:00 PM'],
     })
     setShowDoctorForm(true)
@@ -348,11 +347,11 @@ export default function AdminPanel() {
         consultationFee: Number(doctorFormData.consultationFee) || 500,
         availableToday: doctorFormData.availability === 'Today',
         availability: (doctorFormData.availability as any) || 'Today',
-        profileImage: doctorFormData.profileImage || 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=300&q=80',
         qualification: doctorFormData.qualification || 'MBBS',
         languages: doctorFormData.languages || ['English', 'Telugu'],
         phone: doctorFormData.phone || '+91 98480 00000',
         gender: (doctorFormData.gender as 'Male' | 'Female') || 'Male',
+        patientsServed: doctorFormData.patientsServed || 500,
         availableSlots: doctorFormData.availableSlots || ['10:00 AM', '02:00 PM'],
       }
 
@@ -576,7 +575,11 @@ export default function AdminPanel() {
                         <tr key={docItem.id} className="border-b border-white/5 hover:bg-white/3 transition-colors">
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-3">
-                              <img src={docItem.profileImage} alt={docItem.name} className="w-9 h-9 rounded-xl object-cover border border-white/10" onError={e=>(e.target as HTMLImageElement).src='https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=300&q=80'}/>
+                              <DoctorIcon 
+                                specialization={docItem.specialization} 
+                                wrapperClassName="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center shrink-0 border border-white/10"
+                                className="w-4 h-4 text-white"
+                              />
                               <div>
                                 <p className="text-white font-semibold text-sm">{docItem.name}</p>
                                 <p className="text-dark-400 text-[11px]">{docItem.qualification}</p>
@@ -689,11 +692,6 @@ export default function AdminPanel() {
                     <input type="text" value={doctorFormData.phone||''} onChange={e=>setDoctorFormData(p=>({...p,phone:e.target.value}))}
                       placeholder="+91 98480 XXXXX" className="w-full glass-input bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder:text-dark-500"/>
                   </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-dark-400 mb-1">Profile Image URL</label>
-                  <input type="url" value={doctorFormData.profileImage||''} onChange={e=>setDoctorFormData(p=>({...p,profileImage:e.target.value}))}
-                    placeholder="https://..." className="w-full glass-input bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder:text-dark-500"/>
                 </div>
               </div>
               <div className="p-6 border-t border-white/10 flex gap-3 justify-end">

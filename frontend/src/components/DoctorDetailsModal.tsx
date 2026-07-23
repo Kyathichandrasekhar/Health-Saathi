@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Doctor } from '../types/doctor'
+import DoctorIcon from './DoctorIcon'
 
 interface DoctorDetailsModalProps {
   doctor: Doctor | null
@@ -97,14 +98,10 @@ export default function DoctorDetailsModal({
           <div className="relative bg-gradient-to-r from-primary-900/60 via-dark-800 to-secondary-900/60 p-6 sm:p-8 pt-8">
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
               <div className="relative">
-                <img
-                  src={doctor.profileImage}
-                  alt={doctor.name}
-                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover border-4 border-primary-500/30 shadow-glass"
-                  onError={(e) => {
-                    ;(e.target as HTMLImageElement).src =
-                      'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=300&q=80'
-                  }}
+                <DoctorIcon 
+                  specialization={doctor.specialization} 
+                  wrapperClassName="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center shrink-0 border-4 border-primary-500/30 shadow-glass"
+                  className="w-12 h-12 text-white"
                 />
                 <span
                   className={`absolute -bottom-2 -right-2 px-2 py-0.5 rounded-full text-[10px] font-bold border border-white/20 ${
