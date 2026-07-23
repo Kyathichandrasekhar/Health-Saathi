@@ -12,6 +12,7 @@ import Dashboard from './pages/Dashboard'
 import AdminPanel from './pages/AdminPanel'
 import Assistant from './pages/Assistant'
 import ProtectedRoute from './components/ProtectedRoute'
+import VoiceAgent from './components/VoiceAgent/VoiceAgent'
 import { warmHospitalsCache } from './services/hospitalCache'
 
 function App() {
@@ -50,6 +51,7 @@ function App() {
           </Routes>
         </AnimatePresence>
       </main>
+      <VoiceAgent />
     </div>
   )
 }

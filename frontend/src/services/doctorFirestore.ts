@@ -14,7 +14,7 @@ import { SAMPLE_DOCTORS, SAMPLE_HOSPITALS, SampleHospital } from './doctorData'
 
 const DOCTORS_COLLECTION = 'doctors'
 const HOSPITALS_COLLECTION = 'hospitals'
-const DOCTOR_LOCAL_STORAGE_KEY = 'hs_doctors_cache_v1'
+const DOCTOR_LOCAL_STORAGE_KEY = 'hs_doctors_cache_v2'
 
 // Standardize doctor object fields between Firestore schema and Doctor type
 function normalizeDoctorFromDoc(id: string, data: any): Doctor {
@@ -113,10 +113,16 @@ export async function getDoctors(): Promise<Doctor[]> {
 
   _fetchPromise = (async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, DOCTORS_COLLECTION))
-      if (!querySnapshot.empty) {
-        const docs = querySnapshot.docs.map((docSnap) =>
-          normalizeDoctorFromDoc(docSnap.id, docSnap.data()),
+      const docsSnap = await getDocs(collection(db, DOCTORS_COLLECTION))
+      if (!docsSnap.empty) {
+        // FORCE WIPE AND RESEED for dataset migration
+        if (localStorage.getItem('did_migrate_v2') !== 'true') {
+           localStorage.setItem('did_migrate_v2', 'true')
+           await seedInitialDataIfNeeded()
+        }
+
+        const docs = docsSnap.docs.map((docSnap) =>
+          normalizeDoctorFromDoc(docSnap.id, docSnap.data())
         )
         saveLocalDoctorsCache(docs)
         _doctorsMemoryCache = docs
@@ -162,28 +168,38 @@ export async function getFirestoreHospitals(): Promise<SampleHospital[]> {
 export async function seedInitialDataIfNeeded() {
   try {
     const docsSnap = await getDocs(collection(db, DOCTORS_COLLECTION))
-    if (docsSnap.empty) {
-      // Seed hospitals
-      for (const hosp of SAMPLE_HOSPITALS) {
-        await setDoc(doc(db, HOSPITALS_COLLECTION, hosp.id), {
-          hospitalId: hosp.id,
-          name: hosp.name,
-          address: hosp.address,
-          latitude: hosp.latitude,
-          longitude: hosp.longitude,
-          departments: hosp.departments,
-          phone: hosp.phone,
-          rating: hosp.rating,
-        })
-      }
-
-      // Seed doctors
-      for (const docItem of SAMPLE_DOCTORS) {
-        await setDoc(doc(db, DOCTORS_COLLECTION, docItem.id), toFirestoreDoctorDoc(docItem))
-      }
+    
+    // Wipe old doctors to apply new dataset
+    for (const docSnap of docsSnap.docs) {
+      await deleteDoc(docSnap.ref)
     }
-  } catch {
-    // Ignore seed failures in offline environment
+    
+    // Wipe old hospitals
+    const hospSnap = await getDocs(collection(db, HOSPITALS_COLLECTION))
+    for (const docSnap of hospSnap.docs) {
+      await deleteDoc(docSnap.ref)
+    }
+
+    // Seed hospitals
+    for (const hosp of SAMPLE_HOSPITALS) {
+      await setDoc(doc(db, HOSPITALS_COLLECTION, hosp.id), {
+        hospitalId: hosp.id,
+        name: hosp.name,
+        address: hosp.address,
+        latitude: hosp.latitude,
+        longitude: hosp.longitude,
+        departments: hosp.departments,
+        phone: hosp.phone,
+        rating: hosp.rating,
+      })
+    }
+
+    // Seed doctors
+    for (const docItem of SAMPLE_DOCTORS) {
+      await setDoc(doc(db, DOCTORS_COLLECTION, docItem.id), toFirestoreDoctorDoc(docItem))
+    }
+  } catch (error) {
+    console.error('Seed error', error)
   }
 }
 

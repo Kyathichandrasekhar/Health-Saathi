@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { QrCode, CheckCircle, XCircle, Users, Clock, UserCheck, RefreshCw, Shield, Printer, Stethoscope, Plus, Pencil, Trash2, X, Save } from 'lucide-react'
+import { QrCode, CheckCircle, XCircle, Users, Clock, UserCheck, RefreshCw, Shield, Printer, Stethoscope, Plus, Pencil, Trash2, X, Save, Lock } from 'lucide-react'
 import QRScanner from '../components/QRScanner'
 import { adminAPI, bookingAPI, queueAPI } from '../services/api'
 import { Doctor, SPECIALIZATIONS } from '../types/doctor'
@@ -88,7 +88,26 @@ export default function AdminPanel() {
   const [isValidating, setIsValidating] = useState(false)
   const [validationStatus, setValidationStatus] = useState<'valid' | 'invalid' | 'already_checked_in' | null>(null)
   const [validationMessage, setValidationMessage] = useState('')
-  const [activeView, setActiveView] = useState<'scanner' | 'queue' | 'doctors'>('scanner')
+  const [activeView, setActiveView] = useState<'queue' | 'doctors'>('queue')
+
+  // Admin Auth State
+  const [isAuthenticatedAdmin, setIsAuthenticatedAdmin] = useState(
+    () => sessionStorage.getItem('admin_authenticated') === 'true'
+  )
+  const [adminPasscode, setAdminPasscode] = useState('')
+  const [adminAuthError, setAdminAuthError] = useState('')
+
+  const handleAdminAuth = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (adminPasscode === 'admin123') {
+      sessionStorage.setItem('admin_authenticated', 'true')
+      setIsAuthenticatedAdmin(true)
+      setAdminAuthError('')
+    } else {
+      setAdminAuthError('Incorrect passcode. Please try again.')
+      setAdminPasscode('')
+    }
+  }
 
   // Doctor Management State
   const [allDoctors, setAllDoctors] = useState<Doctor[]>([])
@@ -380,6 +399,34 @@ export default function AdminPanel() {
     return matchSearch && matchSpec
   })
 
+  if (!isAuthenticatedAdmin) {
+    return (
+      <div className="min-h-screen px-4 py-8 flex items-center justify-center page-enter">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-8 max-w-md w-full text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center mx-auto mb-6 shadow-glow">
+            <Lock className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">Admin Verification</h1>
+          <p className="text-dark-400 mb-8">Please enter the admin passcode to access reception tools.</p>
+          <form onSubmit={handleAdminAuth}>
+            <input
+              type="password"
+              placeholder="Enter passcode"
+              value={adminPasscode}
+              onChange={(e) => setAdminPasscode(e.target.value)}
+              className="w-full glass-input text-center text-lg tracking-widest mb-4 py-3"
+              autoFocus
+            />
+            {adminAuthError && <p className="text-red-400 text-sm mb-4 font-medium">{adminAuthError}</p>}
+            <button type="submit" className="w-full btn-gradient py-3 rounded-xl font-bold">
+              Unlock Admin Panel
+            </button>
+          </form>
+        </motion.div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen px-4 sm:px-6 lg:px-8 py-8 page-enter">
       <div className="max-w-6xl mx-auto">
@@ -398,13 +445,9 @@ export default function AdminPanel() {
           )})}
         </div>
 
-        <div className="flex gap-1 p-1 glass rounded-xl mb-6 w-fit">
-          <button onClick={()=>setActiveView('scanner')} className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${activeView==='scanner'?'bg-primary-500/20 text-primary-300':'text-dark-400 hover:text-white'}`}><QrCode className="w-4 h-4"/>Scanner</button>
-          <button onClick={()=>setActiveView('queue')} className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${activeView==='queue'?'bg-primary-500/20 text-primary-300':'text-dark-400 hover:text-white'}`}><Users className="w-4 h-4"/>Queue</button>
-          <button onClick={()=>setActiveView('doctors')} className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${activeView==='doctors'?'bg-emerald-500/20 text-emerald-300':'text-dark-400 hover:text-white'}`}><Stethoscope className="w-4 h-4"/>Doctors</button>
-        </div>
-
-        {activeView==='scanner' ? (
+        {/* Reception Scanner Section */}
+        <div className="mb-12">
+          <h2 className="text-2xl font-bold text-white mb-6">Reception Scanner</h2>
           <div className="grid lg:grid-cols-2 gap-6">
             <motion.div initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} className="glass-card p-6">
               <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><QrCode className="w-5 h-5 text-primary-400"/>Scan Patient QR</h2>
@@ -446,7 +489,17 @@ export default function AdminPanel() {
               )}
             </motion.div>
           </div>
-        ) : activeView === 'queue' ? (
+        </div>
+
+        {/* Queue Management Section */}
+        <div>
+          <h2 className="text-2xl font-bold text-white mb-4">Queue Management</h2>
+          <div className="flex gap-1 p-1 glass rounded-xl mb-6 w-fit">
+            <button onClick={()=>setActiveView('queue')} className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${activeView==='queue'?'bg-primary-500/20 text-primary-300':'text-dark-400 hover:text-white'}`}><Users className="w-4 h-4"/>Queue</button>
+            <button onClick={()=>setActiveView('doctors')} className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${activeView==='doctors'?'bg-emerald-500/20 text-emerald-300':'text-dark-400 hover:text-white'}`}><Stethoscope className="w-4 h-4"/>Doctors</button>
+          </div>
+
+          {activeView === 'queue' ? (
           <motion.div initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} className="glass-card p-6">
             <h2 className="text-xl font-bold text-white mb-4">Today's Queue {activeDoctorId ? `— ${activeDoctorId}` : ''}{activeQueueDate ? ` (${activeQueueDate})` : ''}</h2>
             <table className="w-full text-sm">
@@ -557,6 +610,7 @@ export default function AdminPanel() {
             )}
           </motion.div>
         )}
+        </div>
       </div>
 
       {/* Doctor Add/Edit Form Modal */}

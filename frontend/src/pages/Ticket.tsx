@@ -274,46 +274,165 @@ export default function Ticket() {
       }
 
       const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
-
+      const pageWidth = 595.28;
+      
+      // Header Background
       pdf.setFillColor(21, 31, 65)
-      pdf.rect(0, 0, 595, 90, 'F')
+      pdf.rect(0, 0, pageWidth, 100, 'F')
+      
+      // Header Text
       pdf.setTextColor(255, 255, 255)
-      pdf.setFontSize(22)
-      pdf.text('Health Saathi - Appointment Receipt', 40, 55)
-
-      pdf.setTextColor(20, 20, 20)
-      pdf.setFontSize(11)
-
-      const lines = [
-        `Appointment ID: ${receipt.appointment_id}`,
-        `Patient Name: ${receipt.patient_name}`,
-        `Patient Email: ${receipt.patient_email}`,
-        `Patient User ID: ${receipt.user_id}`,
-        `Patient Phone: ${receipt.patient_phone || 'N/A'}`,
-        `Hospital: ${receipt.hospital_name}`,
-        `Doctor: ${receipt.doctor_name}`,
-        `Specialization: ${receipt.specialization}`,
-        `Appointment Date: ${receipt.date}`,
-        `Appointment Time: ${receipt.slot}`,
-        `Token Number: ${receipt.token_number}`,
-        `Payment Status: ${receipt.payment_status}`,
-        `Paid Amount: INR ${receipt.paid_amount}`,
-        `Booking Timestamp: ${new Date(receipt.booking_timestamp).toLocaleString('en-IN')}`,
-      ]
-
-      let y = 130
-      lines.forEach((line) => {
-        pdf.text(line, 40, y)
-        y += 22
-      })
-
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(24)
+      pdf.text('Health Saathi', 40, 50)
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(14)
+      pdf.text('Appointment Receipt & Digital Ticket', 40, 75)
+      
+      // Sub Header
+      pdf.setTextColor(100, 100, 100)
+      pdf.setFontSize(10)
+      pdf.text(`Booking Date: ${new Date(receipt.booking_timestamp).toLocaleString('en-IN')}`, 40, 130)
+      pdf.text(`Appointment ID: ${receipt.appointment_id}`, 40, 145)
+      
+      // Draw Line
+      pdf.setDrawColor(200, 200, 200)
+      pdf.setLineWidth(1)
+      pdf.line(40, 160, pageWidth - 40, 160)
+      
+      // Appointment Details Box
+      pdf.setFillColor(245, 247, 250)
+      pdf.rect(40, 180, 300, 120, 'F')
+      
+      pdf.setTextColor(21, 31, 65)
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(12)
+      pdf.text('Appointment Details', 55, 200)
+      
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(10)
+      pdf.setTextColor(50, 50, 50)
+      pdf.text(`Doctor: ${receipt.doctor_name}`, 55, 225)
+      pdf.text(`Specialization: ${receipt.specialization}`, 55, 240)
+      pdf.text(`Hospital: ${receipt.hospital_name}`, 55, 255)
+      pdf.text(`Date: ${receipt.date}`, 55, 270)
+      pdf.text(`Time: ${receipt.slot}`, 55, 285)
+      
+      // QR Code
       if (qrDataUrl) {
-        pdf.addImage(qrDataUrl, 'PNG', 390, 125, 160, 160)
+        pdf.addImage(qrDataUrl, 'PNG', 380, 175, 140, 140)
         pdf.setFontSize(9)
-        pdf.text('Scan this QR to open appointment receipt', 390, 300)
+        pdf.setTextColor(100, 100, 100)
+        pdf.text('Scan to View Status', 405, 325)
       }
-
-      pdf.text(ticketUrl, 40, 500)
+      
+      // Draw Line
+      pdf.setDrawColor(200, 200, 200)
+      pdf.line(40, 345, pageWidth - 40, 345)
+      
+      let startY = 370;
+      
+      // Patient Details
+      pdf.setTextColor(21, 31, 65)
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(14)
+      pdf.text('Patient Information', 40, startY)
+      
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(11)
+      pdf.setTextColor(50, 50, 50)
+      
+      const pDetails = receipt.patient_details || {};
+      const personal = pDetails.personal || {};
+      const medical = pDetails.medical || {};
+      const emergency = pDetails.emergency || {};
+      
+      const pName = personal.fullName || receipt.patient_name;
+      const pEmail = personal.email || receipt.patient_email;
+      const pPhone = personal.phone || receipt.patient_phone || 'N/A';
+      
+      const leftColX = 40;
+      const rightColX = 300;
+      let lineY = startY + 25;
+      
+      pdf.text(`Name: ${pName}`, leftColX, lineY);
+      pdf.text(`Phone: ${pPhone}`, rightColX, lineY);
+      lineY += 20;
+      
+      pdf.text(`Email: ${pEmail}`, leftColX, lineY);
+      if (personal.dob) {
+         pdf.text(`Age / DOB: ${personal.dob}`, rightColX, lineY);
+      }
+      lineY += 20;
+      
+      if (personal.gender) {
+         pdf.text(`Gender: ${personal.gender}`, leftColX, lineY);
+      }
+      if (personal.bloodGroup) {
+         pdf.text(`Blood Group: ${personal.bloodGroup}`, rightColX, lineY);
+      }
+      lineY += 30;
+      
+      if (medical.symptoms || medical.allergies) {
+        pdf.setFont('helvetica', 'bold')
+        pdf.text('Medical Context', 40, lineY)
+        pdf.setFont('helvetica', 'normal')
+        lineY += 20;
+        
+        if (medical.symptoms) {
+            pdf.text(`Symptoms: ${medical.symptoms.substring(0, 70)}${medical.symptoms.length > 70 ? '...' : ''}`, leftColX, lineY);
+            lineY += 20;
+        }
+        if (medical.allergies) {
+            pdf.text(`Allergies: ${medical.allergies}`, leftColX, lineY);
+            lineY += 20;
+        }
+        if (medical.existingDiseases) {
+            pdf.text(`Existing Diseases: ${medical.existingDiseases}`, leftColX, lineY);
+            lineY += 20;
+        }
+        if (medical.currentMedications) {
+            pdf.text(`Medications: ${medical.currentMedications}`, leftColX, lineY);
+            lineY += 20;
+        }
+        lineY += 10;
+      }
+      
+      if (emergency.name) {
+        pdf.setFont('helvetica', 'bold')
+        pdf.text('Emergency Contact', 40, lineY)
+        pdf.setFont('helvetica', 'normal')
+        lineY += 20;
+        
+        pdf.text(`Name: ${emergency.name} (${emergency.relationship || 'N/A'})`, leftColX, lineY);
+        pdf.text(`Phone: ${emergency.phone || 'N/A'}`, rightColX, lineY);
+        lineY += 40;
+      }
+      
+      // Payment & Token Box
+      pdf.setDrawColor(200, 200, 200)
+      pdf.line(40, lineY - 15, pageWidth - 40, lineY - 15)
+      
+      pdf.setFillColor(230, 245, 235)
+      pdf.rect(40, lineY, 200, 60, 'F')
+      pdf.setTextColor(30, 100, 50)
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(16)
+      pdf.text(`Token: ${receipt.token_number}`, 60, lineY + 25)
+      pdf.setFontSize(12)
+      pdf.text(`Status: ${receipt.payment_status.toUpperCase()}`, 60, lineY + 45)
+      
+      pdf.setFillColor(245, 247, 250)
+      pdf.rect(260, lineY, 295, 60, 'F')
+      pdf.setTextColor(21, 31, 65)
+      pdf.setFontSize(14)
+      pdf.text(`Paid Amount: INR ${receipt.paid_amount}`, 280, lineY + 35)
+      
+      // Footer
+      pdf.setFontSize(10)
+      pdf.setTextColor(150, 150, 150)
+      pdf.text('Thank you for choosing Health Saathi.', pageWidth / 2, 800, { align: 'center' })
+      
       pdf.save(`HealthSaathi-Receipt-${receipt.appointment_id}.pdf`)
     } catch (error) {
       console.error('Receipt download failed:', error)
@@ -444,6 +563,30 @@ export default function Ticket() {
                   </span>
                 </div>
               </div>
+
+              {receipt.patient_details && receipt.patient_details.medical && (
+                <div className="space-y-3 p-4 rounded-xl bg-primary-500/5 border border-primary-500/10 mt-4">
+                  <h4 className="text-sm font-semibold text-primary-300 mb-2">Patient Profile</h4>
+                  {receipt.patient_details.personal?.dob && (
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="text-dark-400 w-24">Age / DOB</span>
+                      <span className="text-white font-medium">{receipt.patient_details.personal.dob}</span>
+                    </div>
+                  )}
+                  {receipt.patient_details.medical?.symptoms && (
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="text-dark-400 w-24">Symptoms</span>
+                      <span className="text-white font-medium">{receipt.patient_details.medical.symptoms}</span>
+                    </div>
+                  )}
+                  {receipt.patient_details.medical?.allergies && (
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="text-dark-400 w-24">Allergies</span>
+                      <span className="text-red-300 font-medium">{receipt.patient_details.medical.allergies}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Status */}
               <div className="mt-4 p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-center">

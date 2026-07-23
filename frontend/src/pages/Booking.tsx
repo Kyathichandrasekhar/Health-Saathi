@@ -430,7 +430,29 @@ export default function Booking() {
   const [slotLoading, setSlotLoading] = useState(false)
   const [bookingError, setBookingError] = useState('')
   const [dateError, setDateError] = useState('')
+  const [patientDetails, setPatientDetails] = useState({
+    personal: { fullName: '', dob: '', gender: '', phone: '', email: '', bloodGroup: '' },
+    medical: { symptoms: '', existingDiseases: '', currentMedications: '', allergies: '', previousReport: '' },
+    emergency: { name: '', relationship: '', phone: '' },
+    insurance: { provider: '', policyNumber: '' }
+  })
+  const [detailsError, setDetailsError] = useState('')
   const { user } = useAuth()
+
+  useEffect(() => {
+    if (user) {
+      setPatientDetails(prev => ({
+        ...prev,
+        personal: {
+          ...prev.personal,
+          fullName: prev.personal.fullName || user.displayName || '',
+          email: prev.personal.email || user.email || '',
+          phone: prev.personal.phone || user.phoneNumber || ''
+        }
+      }))
+    }
+  }, [user])
+
   const navigate = useNavigate()
   const location = useLocation()
   const effectiveHospitalName = mapHospital?.name || allHospitals.find((h) => h.id === selectedHospital)?.name || ''
@@ -692,9 +714,10 @@ export default function Booking() {
           specialization: doctor.specialization || doctor.specialty,
           fee: doctor.fee,
           slotTimings: doctor.slot_timings,
-          patientName: user?.displayName || undefined,
-          patientEmail: user?.email || undefined,
-          patientPhone: user?.phoneNumber || undefined,
+          patientName: patientDetails.personal.fullName || user?.displayName || undefined,
+          patientEmail: patientDetails.personal.email || user?.email || undefined,
+          patientPhone: patientDetails.personal.phone || user?.phoneNumber || undefined,
+          patientDetails: patientDetails,
         })
       } catch (error) {
         const message = error instanceof Error ? error.message.toLowerCase() : ''
@@ -819,9 +842,9 @@ export default function Booking() {
         )}
 
         {/* Progress Steps */}
-        <div className="flex items-center gap-2 mb-10">
-          {['Hospital', 'Doctor', 'Slot', 'Confirm'].map((label, i) => (
-            <div key={label} className="flex items-center gap-2 flex-1">
+        <div className="flex items-center gap-2 mb-10 overflow-x-auto pb-2">
+          {['Hospital', 'Doctor', 'Slot', 'Details', 'Review'].map((label, i) => (
+            <div key={label} className="flex items-center gap-2 flex-1 min-w-[max-content]">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
                 step > i + 1
                   ? 'bg-green-500 text-white'
@@ -836,7 +859,7 @@ export default function Booking() {
               }`}>
                 {label}
               </span>
-              {i < 3 && (
+              {i < 4 && (
                 <div className={`flex-1 h-0.5 rounded ${
                   step > i + 1 ? 'bg-green-500' : 'bg-white/5'
                 }`} />
@@ -1018,7 +1041,7 @@ export default function Booking() {
           </motion.div>
         )}
 
-        {/* Step 4: Confirm */}
+        {/* Step 4: Patient Details */}
         {step === 4 && doctor && (
           <motion.div
             initial={{ opacity: 0, x: 20 }}
@@ -1027,7 +1050,146 @@ export default function Booking() {
             <button onClick={() => setStep(3)} className="flex items-center gap-2 text-dark-400 hover:text-white transition-colors mb-4">
               <ArrowLeft className="w-4 h-4" /> Back
             </button>
-            <h2 className="text-xl font-semibold text-white mb-4">Confirm Appointment</h2>
+            <h2 className="text-xl font-semibold text-white mb-4">Patient Details</h2>
+
+            {detailsError && (
+              <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {detailsError}
+              </div>
+            )}
+
+            <div className="space-y-6">
+              {/* Personal Information */}
+              <div className="glass-card p-5">
+                <h3 className="text-lg font-bold text-white mb-4">Personal Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Full Name *</label>
+                    <input type="text" className="glass-input w-full" value={patientDetails.personal.fullName} onChange={e => setPatientDetails(p => ({...p, personal: {...p.personal, fullName: e.target.value}}))} placeholder="John Doe" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Age / DOB *</label>
+                    <input type="date" className="glass-input w-full" value={patientDetails.personal.dob} onChange={e => setPatientDetails(p => ({...p, personal: {...p.personal, dob: e.target.value}}))} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Gender *</label>
+                    <select className="glass-input w-full" value={patientDetails.personal.gender} onChange={e => setPatientDetails(p => ({...p, personal: {...p.personal, gender: e.target.value}}))}>
+                      <option value="">Select Gender</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Blood Group (Optional)</label>
+                    <input type="text" className="glass-input w-full" value={patientDetails.personal.bloodGroup} onChange={e => setPatientDetails(p => ({...p, personal: {...p.personal, bloodGroup: e.target.value}}))} placeholder="O+" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Phone Number *</label>
+                    <input type="tel" className="glass-input w-full" value={patientDetails.personal.phone} onChange={e => setPatientDetails(p => ({...p, personal: {...p.personal, phone: e.target.value}}))} placeholder="+91 9876543210" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Email Address (Optional)</label>
+                    <input type="email" className="glass-input w-full" value={patientDetails.personal.email} onChange={e => setPatientDetails(p => ({...p, personal: {...p.personal, email: e.target.value}}))} placeholder="john@example.com" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Medical Information */}
+              <div className="glass-card p-5">
+                <h3 className="text-lg font-bold text-white mb-4">Medical Information</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Symptoms / Reason for Visit *</label>
+                    <textarea className="glass-input w-full h-20 resize-none" value={patientDetails.medical.symptoms} onChange={e => setPatientDetails(p => ({...p, medical: {...p.medical, symptoms: e.target.value}}))} placeholder="Describe your symptoms briefly..."></textarea>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Existing Diseases (Optional)</label>
+                    <input type="text" className="glass-input w-full" value={patientDetails.medical.existingDiseases} onChange={e => setPatientDetails(p => ({...p, medical: {...p.medical, existingDiseases: e.target.value}}))} placeholder="e.g. Diabetes, Hypertension" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Current Medications (Optional)</label>
+                    <input type="text" className="glass-input w-full" value={patientDetails.medical.currentMedications} onChange={e => setPatientDetails(p => ({...p, medical: {...p.medical, currentMedications: e.target.value}}))} placeholder="e.g. Metformin 500mg" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Allergies (Optional)</label>
+                    <input type="text" className="glass-input w-full" value={patientDetails.medical.allergies} onChange={e => setPatientDetails(p => ({...p, medical: {...p.medical, allergies: e.target.value}}))} placeholder="e.g. Penicillin, Peanuts" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Upload Previous Medical Reports (Optional)</label>
+                    <input type="file" className="glass-input w-full py-2" onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) setPatientDetails(p => ({...p, medical: {...p.medical, previousReport: file.name}}));
+                    }} accept=".pdf,image/*" />
+                    <p className="text-xs text-dark-400 mt-1">Files will be attached to your appointment record.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Emergency Contact */}
+              <div className="glass-card p-5">
+                <h3 className="text-lg font-bold text-white mb-4">Emergency Contact *</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Name</label>
+                    <input type="text" className="glass-input w-full" value={patientDetails.emergency.name} onChange={e => setPatientDetails(p => ({...p, emergency: {...p.emergency, name: e.target.value}}))} placeholder="Jane Doe" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Relationship</label>
+                    <input type="text" className="glass-input w-full" value={patientDetails.emergency.relationship} onChange={e => setPatientDetails(p => ({...p, emergency: {...p.emergency, relationship: e.target.value}}))} placeholder="Spouse / Parent" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Phone</label>
+                    <input type="tel" className="glass-input w-full" value={patientDetails.emergency.phone} onChange={e => setPatientDetails(p => ({...p, emergency: {...p.emergency, phone: e.target.value}}))} placeholder="+91 9876543210" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Insurance */}
+              <div className="glass-card p-5">
+                <h3 className="text-lg font-bold text-white mb-4">Insurance (Optional)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Provider</label>
+                    <input type="text" className="glass-input w-full" value={patientDetails.insurance.provider} onChange={e => setPatientDetails(p => ({...p, insurance: {...p.insurance, provider: e.target.value}}))} placeholder="Star Health / LIC" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-300 mb-2 block">Policy Number</label>
+                    <input type="text" className="glass-input w-full" value={patientDetails.insurance.policyNumber} onChange={e => setPatientDetails(p => ({...p, insurance: {...p.insurance, policyNumber: e.target.value}}))} placeholder="POL-123456789" />
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  const { personal, medical, emergency } = patientDetails;
+                  if (!personal.fullName || !personal.dob || !personal.gender || !personal.phone || !medical.symptoms || !emergency.name || !emergency.phone || !emergency.relationship) {
+                    setDetailsError('Please fill in all required fields marked with *');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    return;
+                  }
+                  setDetailsError('');
+                  setStep(5);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="btn-gradient w-full py-4 text-lg font-semibold rounded-xl mt-6"
+              >
+                Review & Proceed
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Step 5: Review */}
+        {step === 5 && doctor && (
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+          >
+            <button onClick={() => setStep(4)} className="flex items-center gap-2 text-dark-400 hover:text-white transition-colors mb-4">
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <h2 className="text-xl font-semibold text-white mb-4">Review Appointment</h2>
 
             <div className="glass-card p-6 space-y-4">
               <div className="flex items-center gap-4 pb-4 border-b border-white/5">

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import {
@@ -53,6 +53,18 @@ const statusColors: Record<string, { bg: string; text: string; icon: any }> = {
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past' | 'queue'>('upcoming')
+  
+  // Simulate live queue progression for demonstration
+  const [demoCurrentToken, setDemoCurrentToken] = useState(5)
+  
+  useEffect(() => {
+    if (activeTab === 'queue' && demoCurrentToken < 7) {
+      const timer = setInterval(() => {
+        setDemoCurrentToken(prev => prev + 1)
+      }, 5000) // Advances every 5 seconds for demo
+      return () => clearInterval(timer)
+    }
+  }, [activeTab, demoCurrentToken])
 
   const upcomingAppointments = demoAppointments.filter(a => a.status === 'Booked' || a.status === 'Checked-In')
   const pastAppointments = demoAppointments.filter(a => a.status === 'Completed' || a.status === 'Cancelled')
@@ -125,10 +137,10 @@ export default function Dashboard() {
             className="max-w-md"
           >
             <QueueStatus
-              currentToken={5}
+              currentToken={demoCurrentToken}
               yourToken={7}
               totalInQueue={15}
-              estimatedWait="~10 min"
+              avgConsultationTime={12}
               doctorName="Priya Sharma"
             />
 

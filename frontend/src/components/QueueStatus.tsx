@@ -1,10 +1,11 @@
+import { useEffect, useRef } from 'react'
 import { Users, Clock, Hash } from 'lucide-react'
 
 interface QueueStatusProps {
   currentToken: number
   yourToken: number
   totalInQueue: number
-  estimatedWait: string
+  avgConsultationTime?: number // in minutes, defaults to 10
   doctorName: string
 }
 
@@ -12,15 +13,48 @@ export default function QueueStatus({
   currentToken,
   yourToken,
   totalInQueue,
-  estimatedWait,
+  avgConsultationTime = 10,
   doctorName,
 }: QueueStatusProps) {
   const position = yourToken - currentToken
   const isYourTurn = position <= 0
+  const notifiedTurn = useRef(false)
+  const notifiedNext = useRef(false)
+
+  const estimatedWaitMins = Math.max(0, position) * avgConsultationTime
+  const estimatedWait = estimatedWaitMins > 0 ? `~${estimatedWaitMins} min` : 'Now'
+
+  // Request Notification Permissions
+  useEffect(() => {
+    if ('Notification' in window) {
+      if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+        Notification.requestPermission()
+      }
+    }
+  }, [])
+
+  // Trigger Notifications based on queue position
+  useEffect(() => {
+    if (isYourTurn && !notifiedTurn.current) {
+      notifiedTurn.current = true
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification("🎉 It's your turn!", {
+          body: `Please proceed to Dr. ${doctorName}'s cabin.`,
+        })
+      }
+    } else if (position === 1 && !notifiedNext.current) {
+      notifiedNext.current = true
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification("👀 You are next!", {
+          body: `Please get ready. You are next for Dr. ${doctorName}.`,
+        })
+      }
+    }
+  }, [isYourTurn, position, doctorName])
 
   return (
     <div className="glass-card p-6">
-      <h3 className="text-lg font-bold text-white mb-4">Queue Status</h3>
+      <h3 className="text-lg font-bold text-white mb-4">Live Queue Status</h3>
       <p className="text-sm text-dark-400 mb-4">Dr. {doctorName}</p>
 
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -74,7 +108,7 @@ export default function QueueStatus({
           <div
             className="h-full bg-gradient-to-r from-primary-500 to-secondary-500 rounded-full transition-all duration-1000"
             style={{
-              width: `${Math.min(100, ((totalInQueue - position) / totalInQueue) * 100)}%`,
+              width: `${Math.min(100, (Math.max(0, totalInQueue - Math.max(0, position)) / totalInQueue) * 100)}%`,
             }}
           />
         </div>

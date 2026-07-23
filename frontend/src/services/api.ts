@@ -106,6 +106,7 @@ export interface TicketReceipt {
   booking_timestamp: string
   token_number: number
   status: string
+  patient_details?: any
 }
 
 // Helper: get auth token from Firebase
@@ -246,6 +247,7 @@ export const bookingAPI = {
     patientName?: string
     patientEmail?: string
     patientPhone?: string
+    patientDetails?: any
   }) =>
     apiFetch<any>('/booking/create', {
       method: 'POST',
@@ -395,5 +397,21 @@ export const adminAPI = {
     }>('/admin/checkin', {
       method: 'POST',
       body: JSON.stringify({ ticketId, qrData: ticketId }),
+    }),
+}
+
+// ========== Voice Agent APIs ==========
+export interface VoiceAgentIntent {
+  intent: string
+  action: 'search_doctors' | 'book_appointment' | 'navigate' | 'cancel_appointment' | 'show_qr_code' | 'symptom_analysis' | 'missing_info' | 'unknown'
+  message: string
+  payload?: any
+}
+
+export const voiceAgentAPI = {
+  processSpeech: (data: { message: string; language: string; session_id: string }) =>
+    apiFetch<VoiceAgentIntent>('/voice-agent', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
 }
