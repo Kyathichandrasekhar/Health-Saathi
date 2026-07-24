@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { QrCode, CheckCircle, XCircle, Users, Clock, UserCheck, RefreshCw, Shield, Printer, Stethoscope, Plus, Pencil, Trash2, X, Save, Lock } from 'lucide-react'
 import QRScanner from '../components/QRScanner'
@@ -7,6 +7,13 @@ import { adminAPI, bookingAPI, queueAPI } from '../services/api'
 import { Doctor, SPECIALIZATIONS } from '../types/doctor'
 import { getDoctors, getFirestoreHospitals, addDoctor, updateDoctor, deleteDoctor } from '../services/doctorFirestore'
 import { SAMPLE_HOSPITALS, SampleHospital } from '../services/doctorData'
+import {
+  addToQueue,
+  updateQueueEntry,
+  subscribeToQueue,
+  type QueueDocument,
+  type QueueEntry as FirestoreQueueEntry,
+} from '../services/queueFirestore'
 
 interface ScannedPatient {
   appointmentId: string
@@ -135,6 +142,7 @@ export default function AdminPanel() {
   const [activeQueueDate, setActiveQueueDate] = useState('')
   const [scannerError, setScannerError] = useState('')
   const statusColors: Record<string,string> = { Completed:'text-green-400', 'In Progress':'text-yellow-400', Waiting:'text-dark-400' }
+  const queueUnsubRef = useRef<(() => void) | null>(null)
 
   const handlePrintReceipt = () => {
     window.print()
@@ -261,6 +269,26 @@ export default function AdminPanel() {
         doctorId,
         status: checkIn.status === 'already_checked_in' ? 'already-checked-in' : 'valid',
       })
+
+      // Write to Firestore for real-time patient view
+      if (doctorId && (checkIn.date || validated.date)) {
+        const queueDate = checkIn.date || validated.date || ''
+        const entryToken = Number(checkIn.token || validated.token) || 0
+        try {
+          await addToQueue(doctorId, queueDate, {
+            appointmentId: checkIn.appointmentId || validated.appointmentId || 'unknown',
+            token: entryToken,
+            name: checkIn.patientName || validated.patientName || 'Patient',
+            time: checkIn.slot || validated.slot || '-',
+            status: 'Waiting',
+          }, {
+            doctorName: checkIn.doctorName || validated.doctorName || '',
+            hospitalName: checkIn.hospitalName || validated.hospitalName || '',
+          })
+        } catch (firestoreErr) {
+          console.error('Firestore addToQueue error:', firestoreErr)
+        }
+      }
     } catch {
       if (localDecoded) {
         setScannerError('Offline fallback: showing QR details, but backend validation failed.')
@@ -282,6 +310,41 @@ export default function AdminPanel() {
   useEffect(() => {
     void loadAllDoctors()
   }, [])
+
+  // Subscribe to Firestore queue when activeDoctorId/date changes
+  useEffect(() => {
+    if (queueUnsubRef.current) {
+      queueUnsubRef.current()
+      queueUnsubRef.current = null
+    }
+
+    if (!activeDoctorId || !activeQueueDate) return
+
+    const unsub = subscribeToQueue(activeDoctorId, activeQueueDate, (queueDoc: QueueDocument | null) => {
+      if (!queueDoc) return
+
+      const entries: LiveQueueEntry[] = queueDoc.queue.map((e: FirestoreQueueEntry) => ({
+        appointmentId: e.appointmentId,
+        token: e.token,
+        name: e.name,
+        time: e.time,
+        status: e.status,
+      }))
+      entries.sort((a, b) => a.token - b.token)
+      setLiveQueue(entries)
+      setQueueTotal(entries.length)
+      setCheckedInCount(entries.filter((e) => e.status !== 'Waiting').length)
+    })
+
+    queueUnsubRef.current = unsub
+
+    return () => {
+      if (queueUnsubRef.current) {
+        queueUnsubRef.current()
+        queueUnsubRef.current = null
+      }
+    }
+  }, [activeDoctorId, activeQueueDate])
 
   const loadAllDoctors = async () => {
     setIsDoctorsLoading(true)
@@ -512,7 +575,7 @@ export default function AdminPanel() {
                   <td className="py-3 px-4 text-white">{q.name}</td><td className="py-3 px-4 text-dark-400">{q.time}</td>
                   <td className="py-3 px-4 text-dark-400">{peopleAhead}</td><td className="py-3 px-4 text-dark-400">{estWait} mins</td>
                   <td className={`py-3 px-4 font-medium ${statusColors[q.status]}`}>{q.status}</td>
-                  <td className="py-3 px-4">{q.status==='Waiting'&&<button className="px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 text-xs font-medium hover:bg-green-500/20">Call</button>}{q.status==='In Progress'&&<button className="px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Done</button>}</td>
+                  <td className="py-3 px-4">{q.status==='Waiting'&&<button onClick={async () => { if (activeDoctorId && activeQueueDate) { try { await updateQueueEntry(activeDoctorId, activeQueueDate, q.appointmentId, 'In Progress') } catch(err) { console.error('Call error:', err) } } }} className="px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 text-xs font-medium hover:bg-green-500/20">Call</button>}{q.status==='In Progress'&&<button onClick={async () => { if (activeDoctorId && activeQueueDate) { try { await updateQueueEntry(activeDoctorId, activeQueueDate, q.appointmentId, 'Completed') } catch(err) { console.error('Done error:', err) } } }} className="px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Done</button>}</td>
                 </tr>
               )})}</tbody>
             </table>

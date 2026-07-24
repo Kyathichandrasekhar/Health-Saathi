@@ -11,6 +11,7 @@ import Ticket from './pages/Ticket'
 import Dashboard from './pages/Dashboard'
 import AdminPanel from './pages/AdminPanel'
 import Assistant from './pages/Assistant'
+import MyQueue from './pages/MyQueue'
 import ProtectedRoute from './components/ProtectedRoute'
 import VoiceAgent from './components/VoiceAgent/VoiceAgent'
 import { warmHospitalsCache } from './services/hospitalCache'
@@ -44,6 +45,7 @@ function App() {
                     <Route path="/dashboard" element={<Dashboard />} />
                     <Route path="/admin" element={<AdminPanel />} />
                     <Route path="/assistant" element={<Assistant />} />
+                    <Route path="/my-queue" element={<MyQueue />} />
                   </Routes>
                 </ProtectedRoute>
               }

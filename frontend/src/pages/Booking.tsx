@@ -306,11 +306,51 @@ function isDateBeforeToday(dateValue: string) {
     return false
   }
 
-  const selected = new Date(`${dateValue}T00:00:00`)
+  const [y, m, d] = dateValue.split('-').map(Number)
+  const selected = new Date(y, m - 1, d)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
   return selected < today
+}
+
+function getLocalDateString(d: Date = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function isDateToday(dateValue: string) {
+  if (!dateValue) return false
+  const [y, m, d] = dateValue.split('-').map(Number)
+  const selected = new Date(y, m - 1, d)
+  const today = new Date()
+  return (
+    selected.getDate() === today.getDate() &&
+    selected.getMonth() === today.getMonth() &&
+    selected.getFullYear() === today.getFullYear()
+  )
+}
+
+function filterAvailableSlots(slots: string[], dateValue: string) {
+  if (!slots || !slots.length || !isDateToday(dateValue)) return slots
+
+  const [y, m, d] = dateValue.split('-').map(Number)
+  const now = new Date()
+  const threshold = new Date(now.getTime() + 60 * 60 * 1000)
+
+  return slots.filter((slot) => {
+    const match = slot.match(/(\d+):(\d+)\s*(AM|PM)/i)
+    if (!match) return true
+    
+    let [_, hours, minutes, ampm] = match
+    let h = parseInt(hours, 10)
+    const min = parseInt(minutes, 10)
+    
+    if (ampm.toUpperCase() === 'PM' && h < 12) h += 12
+    if (ampm.toUpperCase() === 'AM' && h === 12) h = 0
+    
+    const slotTime = new Date(y, m - 1, d, h, min, 0)
+    return slotTime >= threshold
+  })
 }
 
 function hashString(text: string) {
@@ -498,7 +538,7 @@ export default function Booking() {
       setHospitalDoctors([doctorProfile])
       setSelectedDoctor(doctorProfile.id)
 
-      const todayStr = new Date().toISOString().split('T')[0]
+      const todayStr = getLocalDateString()
       setSelectedDate(todayStr)
       setSelectedSlot(preSelectedTime || doctorProfile.localSlots?.[0] || '10:00 AM')
       setAvailableSlots(doctorProfile.localSlots || ['09:00 AM', '10:30 AM', '02:00 PM'])
@@ -624,21 +664,37 @@ export default function Booking() {
       return
     }
 
-    setDateError('')
-
     let mounted = true
     const loadSlots = async () => {
       try {
         setSlotLoading(true)
         const slotResponse = await doctorAPI.getSlots(selectedDoctor, selectedDate)
         if (mounted) {
-          setAvailableSlots(slotResponse.slots || [])
+          const rawSlots = slotResponse.slots || []
+          const filtered = filterAvailableSlots(rawSlots, selectedDate)
+          if (isDateToday(selectedDate) && rawSlots.length > 0 && filtered.length === 0) {
+            const tomorrow = new Date()
+            tomorrow.setDate(tomorrow.getDate() + 1)
+            setSelectedDate(getLocalDateString(tomorrow))
+            setDateError('No appointment slots are available today. Please select tomorrow or another future date.')
+            return
+          }
+          setAvailableSlots(filtered)
         }
       } catch {
         if (mounted) {
           const localDoctor = hospitalDoctors.find((d) => d.id === selectedDoctor)
           if (localDoctor?.localSlots?.length) {
-            setAvailableSlots(localDoctor.localSlots)
+            const rawSlots = localDoctor.localSlots
+            const filtered = filterAvailableSlots(rawSlots, selectedDate)
+            if (isDateToday(selectedDate) && rawSlots.length > 0 && filtered.length === 0) {
+              const tomorrow = new Date()
+              tomorrow.setDate(tomorrow.getDate() + 1)
+              setSelectedDate(getLocalDateString(tomorrow))
+              setDateError('No appointment slots are available today. Please select tomorrow or another future date.')
+              return
+            }
+            setAvailableSlots(filtered)
             setBookingError('')
           } else {
             setAvailableSlots([])
@@ -1001,7 +1057,7 @@ export default function Booking() {
                     setDateError('')
                   }
                 }}
-                min={new Date().toISOString().split('T')[0]}
+                min={getLocalDateString()}
                 className="glass-input"
               />
               {dateError && <p className="mt-3 text-sm text-red-300">{dateError}</p>}
