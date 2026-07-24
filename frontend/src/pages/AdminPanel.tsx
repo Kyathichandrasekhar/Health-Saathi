@@ -1,19 +1,14 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { QrCode, CheckCircle, XCircle, Users, Clock, UserCheck, RefreshCw, Shield, Printer, Stethoscope, Plus, Pencil, Trash2, X, Save, Lock } from 'lucide-react'
+import { QrCode, CheckCircle, XCircle, Users, Clock, UserCheck, RefreshCw, Shield, Printer, Stethoscope, Plus, Pencil, Trash2, X, Save, Lock, FileText, Eye, Download } from 'lucide-react'
 import QRScanner from '../components/QRScanner'
 import DoctorIcon from '../components/DoctorIcon'
 import { adminAPI, bookingAPI, queueAPI } from '../services/api'
 import { Doctor, SPECIALIZATIONS } from '../types/doctor'
 import { getDoctors, getFirestoreHospitals, addDoctor, updateDoctor, deleteDoctor } from '../services/doctorFirestore'
+import { getMedicalRecords } from '../services/ehrService'
+
 import { SAMPLE_HOSPITALS, SampleHospital } from '../services/doctorData'
-import {
-  addToQueue,
-  updateQueueEntry,
-  subscribeToQueue,
-  type QueueDocument,
-  type QueueEntry as FirestoreQueueEntry,
-} from '../services/queueFirestore'
 
 interface ScannedPatient {
   appointmentId: string
@@ -142,7 +137,40 @@ export default function AdminPanel() {
   const [activeQueueDate, setActiveQueueDate] = useState('')
   const [scannerError, setScannerError] = useState('')
   const statusColors: Record<string,string> = { Completed:'text-green-400', 'In Progress':'text-yellow-400', Waiting:'text-dark-400' }
-  const queueUnsubRef = useRef<(() => void) | null>(null)
+
+  // EHR Panel States
+  const [selectedPatientForEhr, setSelectedPatientForEhr] = useState<{ name: string; patientId: string } | null>(null)
+  const [ehrRecords, setEhrRecords] = useState<any[]>([])
+  const [isLoadingEhr, setIsLoadingEhr] = useState(false)
+  const [selectedEhrRecordForView, setSelectedEhrRecordForView] = useState<any | null>(null)
+
+  const handleViewEhr = async (appointmentId: string, patientName: string) => {
+    setIsLoadingEhr(true)
+    setSelectedPatientForEhr({ name: patientName, patientId: '' })
+    setEhrRecords([])
+    try {
+      const booking = await bookingAPI.getById(appointmentId)
+      const patientUid = booking?.user_id || booking?.userId || ''
+      if (patientUid) {
+        setSelectedPatientForEhr({ name: patientName, patientId: patientUid })
+        const records = await getMedicalRecords(patientUid)
+        setEhrRecords(records)
+      } else {
+        const mockUid = 'demo-patient-123'
+        setSelectedPatientForEhr({ name: patientName, patientId: mockUid })
+        const records = await getMedicalRecords(mockUid)
+        setEhrRecords(records)
+      }
+    } catch (err) {
+      console.error("Failed to load EHR records in Admin Panel:", err)
+      const mockUid = 'demo-patient-123'
+      setSelectedPatientForEhr({ name: patientName, patientId: mockUid })
+      const records = await getMedicalRecords(mockUid)
+      setEhrRecords(records)
+    } finally {
+      setIsLoadingEhr(false)
+    }
+  }
 
   const handlePrintReceipt = () => {
     window.print()
@@ -269,26 +297,6 @@ export default function AdminPanel() {
         doctorId,
         status: checkIn.status === 'already_checked_in' ? 'already-checked-in' : 'valid',
       })
-
-      // Write to Firestore for real-time patient view
-      if (doctorId && (checkIn.date || validated.date)) {
-        const queueDate = checkIn.date || validated.date || ''
-        const entryToken = Number(checkIn.token || validated.token) || 0
-        try {
-          await addToQueue(doctorId, queueDate, {
-            appointmentId: checkIn.appointmentId || validated.appointmentId || 'unknown',
-            token: entryToken,
-            name: checkIn.patientName || validated.patientName || 'Patient',
-            time: checkIn.slot || validated.slot || '-',
-            status: 'Waiting',
-          }, {
-            doctorName: checkIn.doctorName || validated.doctorName || '',
-            hospitalName: checkIn.hospitalName || validated.hospitalName || '',
-          })
-        } catch (firestoreErr) {
-          console.error('Firestore addToQueue error:', firestoreErr)
-        }
-      }
     } catch {
       if (localDecoded) {
         setScannerError('Offline fallback: showing QR details, but backend validation failed.')
@@ -310,41 +318,6 @@ export default function AdminPanel() {
   useEffect(() => {
     void loadAllDoctors()
   }, [])
-
-  // Subscribe to Firestore queue when activeDoctorId/date changes
-  useEffect(() => {
-    if (queueUnsubRef.current) {
-      queueUnsubRef.current()
-      queueUnsubRef.current = null
-    }
-
-    if (!activeDoctorId || !activeQueueDate) return
-
-    const unsub = subscribeToQueue(activeDoctorId, activeQueueDate, (queueDoc: QueueDocument | null) => {
-      if (!queueDoc) return
-
-      const entries: LiveQueueEntry[] = queueDoc.queue.map((e: FirestoreQueueEntry) => ({
-        appointmentId: e.appointmentId,
-        token: e.token,
-        name: e.name,
-        time: e.time,
-        status: e.status,
-      }))
-      entries.sort((a, b) => a.token - b.token)
-      setLiveQueue(entries)
-      setQueueTotal(entries.length)
-      setCheckedInCount(entries.filter((e) => e.status !== 'Waiting').length)
-    })
-
-    queueUnsubRef.current = unsub
-
-    return () => {
-      if (queueUnsubRef.current) {
-        queueUnsubRef.current()
-        queueUnsubRef.current = null
-      }
-    }
-  }, [activeDoctorId, activeQueueDate])
 
   const loadAllDoctors = async () => {
     setIsDoctorsLoading(true)
@@ -541,6 +514,15 @@ export default function AdminPanel() {
                       Status: {validationStatus || '-'} {validationMessage ? `• ${validationMessage}` : ''}
                     </div>
                   )}
+                  {scannedPatient.appointmentId && scannedPatient.appointmentId !== 'invalid' && (
+                    <button
+                      onClick={() => handleViewEhr(scannedPatient.appointmentId, scannedPatient.name)}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary-500/10 border border-primary-500/20 text-primary-300 hover:bg-primary-500/20 transition-all text-sm font-semibold mb-3"
+                    >
+                      <FileText className="w-4 h-4" />
+                      View Medical History (EHR)
+                    </button>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <button onClick={handlePrintReceipt} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-dark-300 hover:bg-white/10 transition-all text-sm"><Printer className="w-4 h-4"/>Print</button>
                     <button onClick={async ()=>{ if (scannedPatient.doctorId) { await refreshQueueForDoctor(scannedPatient.doctorId, scannedPatient.date) } setScannedPatient(null); setScanResult(null); setValidationStatus(null); setValidationMessage(''); setScannerError('') }} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-dark-300 hover:bg-white/10 transition-all text-sm"><RefreshCw className="w-4 h-4"/>Scan Another</button>
@@ -572,10 +554,21 @@ export default function AdminPanel() {
                 return (
                 <tr key={q.token} className="border-b border-white/3 hover:bg-white/3 transition-colors">
                   <td className="py-3 px-4"><span className="w-8 h-8 rounded-lg bg-primary-500/10 inline-flex items-center justify-center text-primary-300 font-bold">{q.token}</span></td>
-                  <td className="py-3 px-4 text-white">{q.name}</td><td className="py-3 px-4 text-dark-400">{q.time}</td>
+                  <td className="py-3 px-4 text-white">
+                    <div className="flex items-center gap-2">
+                      <span>{q.name}</span>
+                      <button
+                        onClick={() => handleViewEhr(q.appointmentId, q.name)}
+                        className="p-1.5 rounded-lg bg-primary-500/15 hover:bg-primary-500/25 text-primary-300 transition-colors"
+                        title="View Medical History (EHR)"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td><td className="py-3 px-4 text-dark-400">{q.time}</td>
                   <td className="py-3 px-4 text-dark-400">{peopleAhead}</td><td className="py-3 px-4 text-dark-400">{estWait} mins</td>
                   <td className={`py-3 px-4 font-medium ${statusColors[q.status]}`}>{q.status}</td>
-                  <td className="py-3 px-4">{q.status==='Waiting'&&<button onClick={async () => { if (activeDoctorId && activeQueueDate) { try { await updateQueueEntry(activeDoctorId, activeQueueDate, q.appointmentId, 'In Progress') } catch(err) { console.error('Call error:', err) } } }} className="px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 text-xs font-medium hover:bg-green-500/20">Call</button>}{q.status==='In Progress'&&<button onClick={async () => { if (activeDoctorId && activeQueueDate) { try { await updateQueueEntry(activeDoctorId, activeQueueDate, q.appointmentId, 'Completed') } catch(err) { console.error('Done error:', err) } } }} className="px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Done</button>}</td>
+                  <td className="py-3 px-4">{q.status==='Waiting'&&<button className="px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 text-xs font-medium hover:bg-green-500/20">Call</button>}{q.status==='In Progress'&&<button className="px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Done</button>}</td>
                 </tr>
               )})}</tbody>
             </table>
@@ -764,6 +757,174 @@ export default function AdminPanel() {
                   {isSavingDoctor ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
                   {isSavingDoctor ? 'Saving...' : editingDoctor ? 'Update Doctor' : 'Add Doctor'}
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* EHR Records Modal */}
+      <AnimatePresence>
+        {selectedPatientForEhr && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-dark-900/80 backdrop-blur-md overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-2xl glass-card border border-white/10 rounded-3xl overflow-hidden shadow-glass-lg my-8 z-10 flex flex-col max-h-[85vh]"
+            >
+              <div className="p-6 border-b border-white/10 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-primary-400" />
+                    Medical History: {selectedPatientForEhr.name}
+                  </h3>
+                  <p className="text-xs text-dark-400 mt-0.5">Patient UID: {selectedPatientForEhr.patientId}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPatientForEhr(null)}
+                  className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                {isLoadingEhr ? (
+                  <div className="text-center py-12">
+                    <RefreshCw className="w-8 h-8 text-primary-400 animate-spin mx-auto mb-2" />
+                    <p className="text-sm text-dark-400">Loading patient records...</p>
+                  </div>
+                ) : ehrRecords.length === 0 ? (
+                  <div className="text-center py-12 text-dark-400 bg-white/3 rounded-2xl border border-white/5">
+                    <FileText className="w-12 h-12 mx-auto mb-3 opacity-20 text-primary-400" />
+                    <p className="text-white font-semibold">No Shared Records</p>
+                    <p className="text-xs max-w-md mx-auto mt-1 px-4 text-dark-400">
+                      The patient has not uploaded any medical prescriptions, reports, or scans to their profile.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-3">
+                    {ehrRecords.map((record) => (
+                      <div
+                        key={record.id}
+                        className="p-4 rounded-2xl border border-white/5 bg-white/3 flex flex-col justify-between md:flex-row md:items-center gap-4 hover:border-primary-500/20 transition-all"
+                      >
+                        <div className="space-y-1.5 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-white font-bold text-sm">{record.title}</h4>
+                            <span className="text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-primary-500/20 text-primary-300 border border-primary-500/10">
+                              {record.recordType}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-dark-400">
+                            Uploaded: {new Date(record.uploadedAt).toLocaleDateString(undefined, {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </p>
+                          {record.notes && (
+                            <p className="text-xs text-dark-300 bg-black/20 p-2 rounded-lg mt-2 border border-white/5 italic">
+                              "{record.notes}"
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex gap-2 shrink-0 self-end md:self-center">
+                          <button
+                            onClick={() => setSelectedEhrRecordForView(record)}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary-500/10 text-primary-300 hover:bg-primary-500/20 text-xs font-semibold transition-all"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            View
+                          </button>
+                          <a
+                            href={record.fileUrl}
+                            download={record.title}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/5 text-dark-300 hover:bg-white/10 text-xs font-semibold transition-all"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            Download
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 border-t border-white/10 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPatientForEhr(null)}
+                  className="px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-dark-300 hover:bg-white/10 text-sm font-semibold"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* EHR Record Document Viewer Modal */}
+      <AnimatePresence>
+        {selectedEhrRecordForView && (
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="glass-card w-full max-w-4xl h-[85vh] p-6 relative flex flex-col"
+            >
+              <div className="flex justify-between items-center mb-4 border-b border-white/5 pb-3">
+                <div>
+                  <h3 className="text-xl font-bold text-white">{selectedEhrRecordForView.title}</h3>
+                  <p className="text-xs text-dark-400 mt-0.5">
+                    Type: <span className="uppercase text-primary-300 font-semibold">{selectedEhrRecordForView.recordType}</span>
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <a
+                    href={selectedEhrRecordForView.fileUrl}
+                    download={selectedEhrRecordForView.title}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download
+                  </a>
+                  <button
+                    onClick={() => setSelectedEhrRecordForView(null)}
+                    className="text-dark-400 hover:text-white transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 bg-dark-950/50 rounded-xl overflow-hidden flex items-center justify-center p-2 relative min-h-[300px]">
+                {selectedEhrRecordForView.fileUrl.startsWith('data:application/pdf') || 
+                 selectedEhrRecordForView.fileUrl.includes('.pdf') || 
+                 selectedEhrRecordForView.storagePath.toLowerCase().endsWith('.pdf') ? (
+                  <iframe
+                    src={selectedEhrRecordForView.fileUrl}
+                    className="w-full h-full border-none rounded-lg"
+                    title={selectedEhrRecordForView.title}
+                  />
+                ) : (
+                  <img
+                    src={selectedEhrRecordForView.fileUrl}
+                    alt={selectedEhrRecordForView.title}
+                    className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+                  />
+                )}
               </div>
             </motion.div>
           </div>
